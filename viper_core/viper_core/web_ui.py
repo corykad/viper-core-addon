@@ -692,6 +692,10 @@ document.addEventListener('submit', async function (event) {{
       if (field) {{ field.setAttribute('aria-invalid', 'true'); field.setAttribute('aria-describedby', statusId); }}
     }}
     if (result.commands) updateHvacResults(result.commands);
+    if (result.ok !== false && String(action || '').includes('ui/setup/finish')) {{
+      window.location.assign(viperBasePath() + '?page=dashboard');
+      return;
+    }}
     if (result.ok !== false && result.state) {{
       await refreshControlSection(form);
       const updatedStatus = document.getElementById(statusId);

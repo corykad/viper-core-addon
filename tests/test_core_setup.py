@@ -1,0 +1,186 @@
+import json
+import asyncio
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ha_addons" / "viper_core"))
+from viper_core.config import CoreConfig
+from viper_core.control import ControlState, ControlApi
+from viper_core.doorbell_listener import doorbell_transition
+from viper_core.doorbell_listener import DoorbellListener
+from viper_core.setup import SetupService
+from viper_core.web_ui import render_page
+
+
+class CleanSetupTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.path = Path(self.directory.name) / "state.json"
+        self.controls = ControlState(self.path)
+        self.ha = Mock()
+        self.ha.get_states.return_value = [
+            {"entity_id": entity, "state": "off", "attributes": {"friendly_name": entity}}
+            for entity in ("event.front_ding", "event.back_ding", "media_player.speaker", "tts.speech")
+        ]
+        self.events = Mock()
+        self.events._speak.return_value = {"sent": True}
+        self.listener = SimpleNamespace(status={"connection": "connected"})
+        self.service = SetupService(self.controls, self.ha, CoreConfig(), self.events, self.listener)
+        self.payload = {"front_door_trigger": "event.front_ding", "front_door_stream_url": "rtsp://example.test/front",
+                        "speaker_entity": "media_player.speaker", "tts_entity": "tts.speech",
+                        "openai_api_key": "test-only", "doorbell_listener_enabled": "true"}
+
+    def test_new_install_is_empty_and_doorbell_only(self):
+        self.assertEqual(self.controls.state["speakers"], {})
+        self.assertFalse(self.controls.state["setup_complete"])
+        self.assertEqual([key for key, value in self.controls.state["features"].items() if value], ["doorbell"])
+        self.assertFalse(self.controls.state["settings"]["doorbell_listener_enabled"])
+        self.assertEqual(self.controls.state["settings"]["front_door_live_stream_switch"], "")
+
+    def test_corrupt_state_fails_to_empty_defaults(self):
+        self.path.write_text("{bad", encoding="utf-8")
+        state = ControlState(self.path)
+        self.assertEqual(state.state["speakers"], {})
+        self.assertFalse(state.feature_enabled("hvac"))
+        self.assertEqual(self.path.read_text(), "{bad")
+
+    def test_empty_or_invalid_state_structure_uses_clean_defaults(self):
+        for payload in ({}, {"speakers": []}, {"settings": "broken"}, {"chimes": {"events": []}}):
+            with self.subTest(payload=payload):
+                self.path.write_text(json.dumps(payload))
+                state = ControlState(self.path)
+                self.assertEqual(state.state["speakers"], {})
+                self.assertFalse(state.feature_enabled("hvac"))
+
+    def test_legacy_saved_state_preserved_without_inserting_speakers(self):
+        self.path.write_text(json.dumps({"settings": {"front_door_stream_url": "rtsp://example.test/old"}, "speakers": {}}))
+        state = ControlState(self.path)
+        self.assertTrue(state.feature_enabled("hvac"))
+        self.assertTrue(state.state["setup_complete"])
+        self.assertFalse(state.state["settings"].get("doorbell_listener_enabled", False))
+        self.assertEqual(state.state["speakers"], {})
+        self.assertEqual(state.state["settings"]["front_door_stream_url"], "rtsp://example.test/old")
+
+    def test_saved_clean_install_stays_clean(self):
+        self.controls._save()
+        state = ControlState(self.path)
+        self.assertFalse(state.feature_enabled("hvac"))
+        self.assertEqual(state.state["speakers"], {})
+
+    def test_public_state_does_not_expose_stream_credentials(self):
+        self.controls.state["settings"]["front_door_stream_url"] = "rtsp://private:secret@example.test/front"
+        public = json.dumps(self.controls.public_state())
+        self.assertNotIn("private:secret", public)
+        self.assertEqual(self.controls.state["settings"]["front_door_stream_url"], "rtsp://private:secret@example.test/front")
+
+    def test_disabled_devices_not_read_or_controlled(self):
+        api = ControlApi(self.controls, self.ha)
+        api.device_status()
+        self.ha.get_state.assert_not_called()
+        self.assertFalse(api.handle_post("/api/control/hvac", {"mode": "cool"})["ok"])
+        self.ha.call_service.assert_not_called()
+
+    def test_invalid_save_does_not_partially_mutate(self):
+        before = self.controls.public_state()
+        self.assertFalse(self.service.handle("save", {**self.payload, "speaker_entity": "media_player.missing"})["ok"])
+        self.assertEqual(before, self.controls.public_state())
+
+    def test_failed_disk_save_is_reported_and_does_not_apply_setup(self):
+        before = self.controls.public_state()
+        with patch.object(self.controls, "_save", return_value=False):
+            result = self.service.handle("save", self.payload)
+        self.assertFalse(result["ok"])
+        self.assertIn("could not be saved", result["message"])
+        self.assertEqual(before, self.controls.public_state())
+
+    def test_setup_must_test_camera_speaker_and_real_press(self):
+        self.assertTrue(self.service.handle("save", self.payload)["ok"])
+        self.assertFalse(self.service.handle("finish", {"heard": "true"})["ok"])
+        self.service.handle("speaker-test", {})
+        with patch("viper_core.setup.vision.describe_doorbell", return_value="A person at the door."):
+            self.assertTrue(self.service.handle("front-test", {})["ok"])
+        self.assertFalse(self.service.handle("finish", {"heard": "true"})["ok"])
+        self.listener.status["last_event_at"] = int(time.time())
+        self.assertFalse(self.service.handle("finish", {})["ok"])
+        self.assertTrue(self.service.handle("finish", {"heard": "true"})["ok"])
+
+    def test_disabling_listener_prevents_finish(self):
+        self.service.handle("save", {**self.payload, "doorbell_listener_enabled": "false"})
+        self.assertIn("Enable automatic doorbell alerts.", self.service.snapshot()["missing"])
+
+    def test_unselecting_speaker_removes_setup_route(self):
+        self.service.handle("save", self.payload)
+        self.service.handle("save", {**self.payload, "speaker_entity": ""})
+        self.assertNotIn("doorbell speaker", self.controls.state["speakers"])
+
+    def test_fresh_page_has_no_optional_device_navigation(self):
+        html = render_page({"control": self.controls.public_state(), "setup": self.service.snapshot()})
+        self.assertIn("Doorbell Setup", html)
+        self.assertNotIn('href="?page=hvac"', html)
+        self.assertNotIn('href="?page=vacuum"', html)
+
+    def test_transition_filters_restore_attributes_and_second_bell(self):
+        settings = {"front_door_trigger": "event.front_ding", "back_door_trigger": "binary_sensor.back_ding"}
+        data = {"entity_id": "event.front_ding", "old_state": {"state": "old"}, "new_state": {"state": "new"}}
+        self.assertEqual(doorbell_transition(data, settings)["door"], "front")
+        self.assertIsNone(doorbell_transition({**data, "old_state": {"state": "new"}}, settings))
+        self.assertIsNone(doorbell_transition({**data, "old_state": None}, settings))
+        back = {"entity_id": "binary_sensor.back_ding", "old_state": {"state": "off"}, "new_state": {"state": "on"}}
+        self.assertIsNone(doorbell_transition(back, settings))
+        settings["back_door_enabled"] = True
+        self.assertEqual(doorbell_transition(back, settings)["door"], "back")
+        self.assertIsNone(doorbell_transition({**back, "new_state": {"state": "off"}}, settings))
+
+    def test_first_ring_event_is_accepted_but_old_restore_is_not(self):
+        settings = {"front_door_trigger": "event.front_ding"}
+        data = {"entity_id": "event.front_ding", "old_state": {"state": "unknown"},
+                "new_state": {"state": datetime.now(timezone.utc).isoformat()}}
+        self.assertEqual(doorbell_transition(data, settings)["door"], "front")
+        data["new_state"]["state"] = "2020-01-01T00:00:00+00:00"
+        self.assertIsNone(doorbell_transition(data, settings))
+
+
+class ListenerConnectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_auth_subscription_and_selected_event_over_websocket(self):
+        from websockets.asyncio.server import serve
+        controls = SimpleNamespace(state={"settings": {"doorbell_listener_enabled": True, "front_door_trigger": "event.front_ding"}}, feature_enabled=lambda feature: True)
+        requests = []
+        finished = asyncio.Event()
+
+        async def endpoint(socket):
+            await socket.send(json.dumps({"type": "auth_required"}))
+            requests.append(json.loads(await socket.recv()))
+            await socket.send(json.dumps({"type": "auth_ok"}))
+            requests.append(json.loads(await socket.recv()))
+            await socket.send(json.dumps({"id": 1, "type": "result", "success": True}))
+            await socket.send(json.dumps({"type": "event", "event": {"data": {
+                "entity_id": "event.front_ding", "old_state": {"state": "earlier"}, "new_state": {"state": "now"}}}}))
+            await finished.wait()
+
+        async with serve(endpoint, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            listener = DoorbellListener(SimpleNamespace(ha_url=f"http://127.0.0.1:{port}/api", ha_token="test-token"), controls, Mock())
+            task = asyncio.create_task(listener.run())
+            try:
+                async def received():
+                    while listener.pending.empty():
+                        await asyncio.sleep(0.01)
+                await asyncio.wait_for(received(), 3)
+                self.assertEqual(listener.pending.get_nowait()[0]["door"], "front")
+                self.assertEqual(listener.status["connection"], "connected")
+                self.assertEqual(requests, [{"type": "auth", "access_token": "test-token"}, {"id": 1, "type": "subscribe_events", "event_type": "state_changed"}])
+            finally:
+                listener.stop_event.set()
+                finished.set()
+                await asyncio.wait_for(task, 3)
+
+
+if __name__ == "__main__":
+    unittest.main()

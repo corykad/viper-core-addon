@@ -28,4 +28,4 @@ jobs:
       - name: Check clean install inside image
         run: >-
           docker run --rm --platform ${{ matrix.platform }} --entrypoint python3
-          -v "$PWD/tests:/tests:ro" viper-core:test /tests/test_clean_install.py
+          -v "$PWD/tests:/tests:ro" viper-core:test -m unittest discover -s /tests

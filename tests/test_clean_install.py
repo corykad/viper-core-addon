@@ -2,8 +2,11 @@
 import importlib
 import json
 import sys
+import subprocess
 import tempfile
+import time
 import unittest
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, "/app")
@@ -13,6 +16,31 @@ from viper_core.web_ui import render_page
 
 
 class CleanImageTests(unittest.TestCase):
+    @unittest.skipUnless(Path("/app/viper_core").is_dir(), "Container startup check")
+    def test_clean_app_starts_and_serves_setup(self):
+        process = subprocess.Popen([sys.executable, "-m", "viper_core"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    self.fail("App exited during startup")
+                try:
+                    with urllib.request.urlopen("http://127.0.0.1:8099/", timeout=1) as response:
+                        html = response.read().decode()
+                    self.assertIn("Doorbell Setup", html)
+                    self.assertNotIn('href="?page=heat-pumps"', html)
+                    return
+                except OSError:
+                    time.sleep(0.1)
+            self.fail("App did not serve the setup page")
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+
     def test_all_runtime_modules_import(self):
         for name in ("__main__", "doorbell_listener", "setup", "vision", "live", "tts"):
             importlib.import_module("viper_core." + name)

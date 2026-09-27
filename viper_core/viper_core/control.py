@@ -637,7 +637,12 @@ class ControlState:
         if self.path.exists():
             try:
                 loaded = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
+                if isinstance(loaded, dict) and loaded:
+                    for key in ("settings", "speakers", "chimes", "features"):
+                        if loaded.get(key) is not None and not isinstance(loaded[key], dict):
+                            raise ValueError(f"Invalid {key} in saved state")
+                    if not isinstance((loaded.get("chimes") or {}).get("events", {}), dict):
+                        raise ValueError("Invalid chime events in saved state")
                     state["features"] = loaded.get("features") or {name: True for name in FEATURES}
                     state["setup_complete"] = loaded.get("setup_complete", True)
                     state["installation_profile"] = loaded.get("installation_profile", "legacy")
@@ -657,7 +662,7 @@ class ControlState:
                         settings.update(loaded["settings"])
                     state["settings"] = settings
                     loaded_successfully = True
-            except (OSError, json.JSONDecodeError) as exc:
+            except (OSError, ValueError) as exc:
                 LOGGER.warning("Could not read Viper Core control state: %s", exc)
         if not loaded_successfully and self.profile != "legacy":
             state["features"] = dict(DOORBELL_FEATURES)
