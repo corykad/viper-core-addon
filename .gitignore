@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+control_state.json
+options.json
+*.log
+*.zip
