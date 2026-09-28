@@ -205,6 +205,9 @@ async def _capture(url, token, entity_id, progress, duration=None, on_frame=None
 
             tasks.append(asyncio.create_task(signaling()))
             await done
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             return {"frames": frames, "frame_count": delivered or len(frames), "elapsed_seconds": round(time.monotonic() - started, 2),
                     "connection": peer.connectionState, "source": "home_assistant_ring_webrtc"}
         finally:
