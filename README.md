@@ -7,7 +7,7 @@ New installations start with an empty, doorbell-focused setup.
 
 Then install **Viper Core**, start it, and open its Web UI.
 
-Read the [setup guide](viper_core/DOCS.md) before your installation visit. It covers Ring-MQTT, Google Cast/Sonos/Alexa, API keys, audible tests and backups.
+Read the [setup guide](viper_core/DOCS.md) before your installation visit. It covers the built-in Ring integration, Google Cast/Sonos/Alexa, API keys, audible tests and backups. No MQTT broker is needed for a new Ring-only install.
 
 This source distribution includes only the add-on and its documentation. It does not include saved household settings, credentials, recordings, generated audio, or the old household automation package. Optional device code remains for legacy compatibility, but those features are disabled on clean installations.
 

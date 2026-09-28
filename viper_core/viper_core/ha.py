@@ -2,6 +2,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit, urlunsplit
 
 
 class HomeAssistantClient:
@@ -12,6 +13,16 @@ class HomeAssistantClient:
 
     def available(self):
         return bool(self.base_url and self.token)
+
+    def websocket_url(self):
+        parts = urlsplit(self.base_url)
+        if parts.scheme not in {"http", "https"} or not parts.hostname:
+            raise ValueError("Home Assistant URL must use HTTP or HTTPS.")
+        path = parts.path.rstrip("/")
+        if parts.hostname == "supervisor" and path == "/core/api":
+            path = "/core"
+        return urlunsplit(("wss" if parts.scheme == "https" else "ws", parts.netloc,
+                           path + "/websocket", "", ""))
 
     def api_status(self):
         started = time.monotonic()

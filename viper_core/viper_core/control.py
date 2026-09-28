@@ -255,6 +255,10 @@ class ControlState:
                 ),
                 "front_door_stream_url": settings.get("front_door_stream_url") or "",
                 "back_door_stream_url": settings.get("back_door_stream_url") or "",
+                "front_door_video_source": settings.get("front_door_video_source") or "rtsp",
+                "back_door_video_source": settings.get("back_door_video_source") or "rtsp",
+                "front_door_camera_entity": settings.get("front_door_camera_entity") or "",
+                "back_door_camera_entity": settings.get("back_door_camera_entity") or "",
                 "front_door_live_stream_switch": settings.get("front_door_live_stream_switch") or "",
                 "back_door_live_stream_switch": settings.get("back_door_live_stream_switch") or "",
                 "front_door_photo_prompt": settings.get("front_door_photo_prompt") or "",
@@ -390,6 +394,12 @@ class ControlState:
 
     def set_settings(self, payload):
         settings = self.state.setdefault("settings", {})
+        requested_mode = str(payload.get("doorbell_video_mode") or "fast").strip().lower()
+        if "doorbell_video_mode" in payload and requested_mode != "fast" and any(
+            settings.get(f"{door}_door_video_source") == "ring_native"
+            for door in ("front", "back") if door == "front" or settings.get("back_door_enabled")
+        ):
+            raise ValueError("Native Ring video currently supports Fast mode. Switch to RTSP before selecting another mode.")
         updated_messages = _cinderella_messages_from_payload(payload, settings.get("cinderella_messages"))
         for key in [
             "external_base_url",
@@ -398,6 +408,8 @@ class ControlState:
             "gemini_live_model",
             "front_door_stream_url",
             "back_door_stream_url",
+            "front_door_camera_entity",
+            "back_door_camera_entity",
             "front_door_live_stream_switch",
             "back_door_live_stream_switch",
             "front_door_photo_prompt",
@@ -435,6 +447,13 @@ class ControlState:
         if "doorbell_video_mode" in payload:
             mode = str(payload.get("doorbell_video_mode") or "fast").strip().lower()
             settings["doorbell_video_mode"] = mode if mode in {"fast", "smart", "live", "detailed", "manual"} else "fast"
+        for door in ("front", "back"):
+            key = f"{door}_door_video_source"
+            if key in payload:
+                source = str(payload[key] or "").strip().lower()
+                if source not in {"rtsp", "ring_native"}:
+                    raise ValueError("Select an available doorbell video source.")
+                settings[key] = source
         styles = dict(settings.get("ai_description_styles") or {})
         custom = dict(settings.get("ai_custom_descriptions") or {})
         if "ai_style_default" in payload:
@@ -569,6 +588,10 @@ class ControlState:
                 "openai_vision_model": DEFAULT_OPENAI_VISION_MODEL,
                 "front_door_stream_url": "",
                 "back_door_stream_url": "",
+                "front_door_video_source": "rtsp",
+                "back_door_video_source": "rtsp",
+                "front_door_camera_entity": "",
+                "back_door_camera_entity": "",
                 "front_door_live_stream_switch": "switch.front_door_live_stream",
                 "back_door_live_stream_switch": "switch.back_door_live_stream",
                 "front_door_photo_prompt": "",
@@ -670,6 +693,7 @@ class ControlState:
             state["setup_complete"] = False
             state["speakers"] = {}
             state["settings"].update({
+                "front_door_video_source": "ring_native", "back_door_video_source": "ring_native",
                 "front_door_live_stream_switch": "", "back_door_live_stream_switch": "",
                 "doorbell_listener_enabled": False, "back_door_enabled": False,
                 "front_door_trigger": "", "back_door_trigger": "", "tts_entity": "",
@@ -808,7 +832,8 @@ class ControlApi:
             try:
                 return {"ok": True, "state": self.control_state.set_settings(payload)}
             except ValueError as exc:
-                return {"ok": False, "message": str(exc), "field": "cinderella_specific_errors_json"}
+                field = "doorbell_video_mode" if str(exc).startswith("Native Ring video") else "cinderella_specific_errors_json"
+                return {"ok": False, "message": str(exc), "field": field}
         if path == "/api/control/hvac":
             return self._set_hvac(payload)
         if path == "/api/control/vacuum":

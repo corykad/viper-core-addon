@@ -44,6 +44,12 @@ class EventProcessor:
         effective_config = self.control_state.effective_config(self.config) if self.control_state else self.config
         key = f"doorbell:{door}"
         is_test = _payload_bool(payload.get("test", False))
+        settings = self.control_state.state.get("settings", {}) if self.control_state else {}
+        if (not is_test and settings.get("doorbell_listener_enabled")
+                and settings.get(f"{door}_door_video_source") == "ring_native"
+                and payload.get("source") != "ha_listener"
+                and payload.get("entity_id") != settings.get(f"{door}_door_trigger")):
+            return self._record("doorbell", payload, True, "Ignored legacy Ring router event; native press listener is selected.", duplicate=True)
         if not is_test and self.control_state and not self.control_state.public_state().get("armed", True):
             return self._record("doorbell", payload, True, f"Ignored {_door_label(door).lower()} {action}; Viper is disarmed.")
         if not is_test and self._is_duplicate(key, seconds=getattr(effective_config, "doorbell_dedupe_seconds", 30)):

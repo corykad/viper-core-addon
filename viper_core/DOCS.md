@@ -24,11 +24,11 @@ Alexa is a separate route and does not need the Home Assistant speech-provider s
 
 ## 2. Connect Ring
 
-Follow the [Ring-MQTT app installation guide](https://github.com/tsightler/ring-mqtt/wiki/Installation-(Home-Assistant-Addon)) to configure an MQTT broker, Home Assistant MQTT discovery, Ring sign-in and video streaming. Use the owner's Ring credentials and complete its authentication flow.
+Add Home Assistant's built-in [Ring integration](https://www.home-assistant.io/integrations/ring/) in Settings > Devices & services. Use the owner's Ring credentials and complete verification inside Home Assistant, not in Viper or a chat. Confirm that each doorbell has a `camera.*_live_view` and `event.*_ding` entity.
 
-From the Ring device's discovered entities, identify its **ding/press** binary sensor and its live stream switch. Obtain the RTSP URL using the Ring-MQTT documentation for your installation. Keep any credentials embedded in that URL private.
+For a new Ring-only installation, do not install Ring-MQTT or Mosquitto. Viper opens live video through Home Assistant and listens for its native ding event. Choose the press event, not a motion event. Ring remains cloud-dependent.
 
-Viper can alternatively listen to a press `event.*` entity from the official [Ring integration](https://www.home-assistant.io/integrations/ring/). This does not remove Viper's requirement for a working RTSP stream for image descriptions. Choose one press entity for each physical doorbell, not a motion entity.
+Existing RTSP installations can keep their streams and switches. RTSP is still available for optional Smart, Detailed, true Live and manual video workflows; the native camera currently supports Fast descriptions.
 
 No Viper-specific YAML automation package is required.
 
@@ -41,7 +41,7 @@ For a local install before repository publication, place the clean package's `vi
 ## 4. Complete Setup
 
 1. Refresh Device List.
-2. Select Main Doorbell Press Event and enter its RTSP URL. Select the stream switch if Ring-MQTT requires it. Enable the second doorbell only when needed.
+2. Select the Main Doorbell `event.*_ding` Press Event and `camera.*_live_view` Live Camera. Leave the Video Source on Built-in Ring. Enable the second doorbell only when needed.
 3. Enable Listen for doorbell presses automatically.
 4. Select the Doorbell Speaker and its connection type. For Sonos or Google Cast, select the Home Assistant Speech Provider.
 5. Select the image-description provider and enter that provider's API key.
@@ -53,7 +53,7 @@ For a local install before repository publication, place the clean package's `vi
 
 An accepted speaker request does not prove it was audible. The final confirmation is deliberately based on what you heard. Camera tests can incur API charges.
 
-The initial speaker choice can be changed later. Add more announcement destinations on Speakers. Voice controls the speech engine; Doorbells controls image models, prompts and optional live narration. Start with still-image descriptions until the basic path has passed the physical doorbell test.
+The initial speaker choice can be changed later. Add more announcement destinations on Speakers. Voice controls the speech engine; Doorbells controls image models and prompts. Native Ring supports Fast descriptions; optional long-form live narration still requires an RTSP source. Start with Fast until the physical doorbell test passes.
 
 ## 5. Handoff And Backup
 
@@ -67,10 +67,10 @@ Ring, the AI provider and some speech providers need internet access. Keep the n
 ## If A Test Fails
 
 - **No events:** check that automatic listening is enabled, Viper is armed, the listener says Connected, and the selected entity changes when the button is pressed. Motion is not a button press.
-- **No image description:** check the stream in Ring-MQTT, its stream switch, the API key and the configured model's availability to that account.
+- **No image description:** check the built-in Ring live view in Home Assistant, the selected camera, the AI API key and the configured model's availability to that account. A live session can occasionally start slowly; try the camera test again.
 - **Speaker request accepted but silent:** check speaker volume, Home Assistant media reachability and the chosen speech provider. Test in Home Assistant too.
 - **Alexa fails:** check Alexa Media Player authentication and its announce action. This is independent of the heat pump Matterbridge integration.
-- **Duplicate announcements:** remove any old Viper forwarding automation when using the built-in listener. Keep only one selected press entity per bell.
+- **Duplicate announcements:** choose one native ding event per bell. Viper ignores its old Ring-MQTT router events after native listening is selected; check for any other household automations that also speak.
 
 The web panel uses Home Assistant ingress by default; no host port is published. Optional direct media/phone links require separate URL and network configuration. Do not expose port 8099 publicly: it is an unauthenticated local control endpoint.
 

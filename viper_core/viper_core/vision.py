@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import logging
@@ -73,16 +74,8 @@ def describe_doorbell(config, ha_client, door):
     api_key = _api_key(config, provider)
     if not api_key:
         return ""
-    stream_url = _stream_url(config, door)
-    if not stream_url or not shutil.which("ffmpeg"):
-        LOGGER.warning("Doorbell AI requires an RTSP stream and ffmpeg.")
-        return ""
     try:
-        live_stream = _prepare_live_stream(config, ha_client, door)
-        try:
-            frames = _capture_stream_frames(stream_url, 2)
-        finally:
-            _cleanup_live_stream(ha_client, live_stream)
+        frames = capture_doorbell_frames(config, ha_client, door)
         if not frames:
             return ""
         prompt = _with_door_context(_photo_prompt(config, door), door)
@@ -102,6 +95,35 @@ def describe_doorbell(config, ha_client, door):
     except Exception as exc:
         LOGGER.warning("Doorbell AI description failed: %s", exc)
         return ""
+
+
+def capture_doorbell_frames(config, ha_client, door):
+    """Capture fresh frames from the explicitly selected source, without fallback."""
+    prefix = "back" if str(door).startswith("back") else "front"
+    source = getattr(config, f"{prefix}_door_video_source", "rtsp")
+    if source == "ring_native":
+        from .ring_camera import CameraError, capture
+
+        entity = getattr(config, f"{prefix}_door_camera_entity", "")
+        if not entity or not ha_client.available():
+            raise CameraError("Native Ring capture requires a camera and Home Assistant connection.")
+        try:
+            url = ha_client.websocket_url()
+        except ValueError as exc:
+            raise CameraError(str(exc)) from exc
+        result = asyncio.run(capture(url, ha_client.token, entity))
+        LOGGER.info("Native Ring frame capture took %.2fs.", result["elapsed_seconds"])
+        return [(frame["jpeg"], "image/jpeg") for frame in result["frames"]]
+    if source != "rtsp":
+        raise ValueError("Unknown doorbell video source.")
+    stream_url = _stream_url(config, door)
+    if not stream_url or not shutil.which("ffmpeg"):
+        raise RuntimeError("Doorbell RTSP capture requires a stream and ffmpeg.")
+    live_stream = _prepare_live_stream(config, ha_client, door)
+    try:
+        return _capture_stream_frames(stream_url, 2)
+    finally:
+        _cleanup_live_stream(ha_client, live_stream)
 
 
 def describe_live_doorbell(config, ha_client, door, seconds=None, mode="manual"):

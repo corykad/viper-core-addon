@@ -1,10 +1,13 @@
 """First-run setup for a new household, with explicit device selection."""
 
+import asyncio
 import time
 from copy import deepcopy
 from urllib.parse import urlsplit
 
 from . import vision
+from .ha import HomeAssistantClient
+from .ring_camera import inventory
 
 
 class SetupService:
@@ -14,6 +17,7 @@ class SetupService:
         self._entities = []
         self._checked_at = 0
         self._discovery_error = ""
+        self._native_ring_ids = None
 
     def discover(self, force=False):
         if force or time.monotonic() - self._checked_at > 20:
@@ -21,8 +25,15 @@ class SetupService:
                 states = self.ha.get_states()
                 self._entities = [{"id": item["entity_id"], "name": (item.get("attributes") or {}).get("friendly_name") or item["entity_id"],
                                    "state": item.get("state", "unknown")}
-                                  for item in states if isinstance(item, dict) and str(item.get("entity_id", "")).startswith(("event.", "binary_sensor.", "media_player.", "tts.", "switch."))]
+                                  for item in states if isinstance(item, dict) and str(item.get("entity_id", "")).startswith(("event.", "binary_sensor.", "media_player.", "tts.", "switch.", "camera."))]
                 self._discovery_error = ""
+                if isinstance(self.ha, HomeAssistantClient) and self.ha.available():
+                    try:
+                        self._native_ring_ids = {item["entity_id"] for item in asyncio.run(
+                            inventory(self.ha.websocket_url(), self.ha.token))}
+                    except Exception:
+                        self._native_ring_ids = set()
+                        self._discovery_error = "Ring entities could not be verified. Check the Ring integration, then refresh devices."
             except Exception:
                 self._entities = []
                 self._discovery_error = "Home Assistant entities could not be loaded. Check HA Status, then refresh devices."
@@ -39,9 +50,12 @@ class SetupService:
         for door in ("front", "back"):
             if door == "back" and not settings.get("back_door_enabled"):
                 continue
-            for key, label in (("trigger", "doorbell event"), ("stream_url", "live RTSP stream")):
-                if not settings.get(f"{door}_door_{key}"):
-                    required.append(f"Select the {door} {label}.")
+            if not settings.get(f"{door}_door_trigger"):
+                required.append(f"Select the {door} doorbell event.")
+            source = settings.get(f"{door}_door_video_source") or "rtsp"
+            key, label = ("camera_entity", "Ring live-view camera") if source == "ring_native" else ("stream_url", "live RTSP stream")
+            if not settings.get(f"{door}_door_{key}"):
+                required.append(f"Select the {door} {label}.")
         if not self.controls.speaker_targets("doorbell")["ha"] and not self.controls.speaker_targets("doorbell")["alexa"]:
             required.append("Select a speaker and make sure Viper is not muted.")
         effective = self.controls.effective_config(self.config)
@@ -71,7 +85,7 @@ class SetupService:
                 if door == "back" and not self.controls.state["settings"].get("back_door_enabled"):
                     raise ValueError("Enable the back door before testing it.")
                 description = vision.describe_doorbell(self.controls.effective_config(self.config), self.ha, door)
-                return self._record(door, bool(description), description or "No image description returned. Check the RTSP stream, API key and model on the Doorbells page.")
+                return self._record(door, bool(description), description or "No image description returned. Check the selected camera, API key and model on the Doorbells page.")
             if action == "finish":
                 state = self.snapshot()
                 checks = state["checks"]
@@ -108,9 +122,25 @@ class SetupService:
         known = {item["id"] for item in self.discover(True)}
         back = payload.get("back_door_enabled") == "true"
         for door in ("front", "back"):
+            source = str(payload.get(f"{door}_door_video_source") or settings.get(f"{door}_door_video_source") or "rtsp")
+            if source not in {"rtsp", "ring_native"}:
+                raise ValueError(f"Select a valid video source for the {door} door.")
+            camera = str(payload.get(f"{door}_door_camera_entity") or "").strip()
+            if camera and (camera not in known or not camera.startswith("camera.")):
+                raise ValueError(f"Select an available {door} camera.")
+            if source == "ring_native" and (door == "front" or back) and camera:
+                if not camera.endswith("_live_view") or (self._native_ring_ids is not None and camera not in self._native_ring_ids):
+                    raise ValueError(f"Select the built-in Ring live-view camera for the {door} door.")
+            if source == "ring_native" and not camera and (door == "front" or back):
+                raise ValueError(f"Select a Ring live-view camera for the {door} door.")
+            settings[f"{door}_door_video_source"] = source
+            settings[f"{door}_door_camera_entity"] = camera
             trigger = str(payload.get(f"{door}_door_trigger") or "").strip()
             if trigger and (trigger not in known or not trigger.startswith(("event.", "binary_sensor."))):
                 raise ValueError(f"Select an available {door} doorbell event.")
+            if source == "ring_native" and (door == "front" or back) and trigger:
+                if not trigger.startswith("event.") or not trigger.endswith("_ding") or (self._native_ring_ids is not None and trigger not in self._native_ring_ids):
+                    raise ValueError(f"Select the built-in Ring ding event for the {door} door.")
             switch = str(payload.get(f"{door}_door_live_stream_switch") or "").strip()
             if switch and (switch not in known or not switch.startswith("switch.")):
                 raise ValueError(f"Select an available {door} stream switch or leave it blank.")
@@ -124,6 +154,10 @@ class SetupService:
                 settings[f"{door}_door_stream_url"] = stream
         if back and settings["front_door_trigger"] and settings["front_door_trigger"] == settings["back_door_trigger"]:
             raise ValueError("Choose different events for the front and back doors.")
+        if any(settings.get(f"{door}_door_video_source") == "ring_native" for door in ("front", "back") if door == "front" or back):
+            mode = settings.get("doorbell_video_mode") or "fast"
+            if mode != "fast":
+                raise ValueError("Native Ring video currently supports Fast mode. Select Fast mode on the Doorbells page.")
         settings["back_door_enabled"] = back
         settings["doorbell_listener_enabled"] = payload.get("doorbell_listener_enabled") == "true"
         tts = str(payload.get("tts_entity") or "")

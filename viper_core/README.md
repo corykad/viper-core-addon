@@ -19,13 +19,15 @@ New installations start with one doorbell slot, no selected speakers or credenti
 
 ## Doorbell Setup
 
-The Setup page discovers Home Assistant entities so you can select the doorbell press event, speaker and speech provider. Add the live RTSP stream supplied by Ring-MQTT and your image-description API key. Save, test the speaker and camera, then press the real doorbell and confirm that you heard it.
+The Setup page discovers Home Assistant entities so you can select the built-in Ring ding event and live-view camera, speaker and speech provider. Add your image-description API key. Save, test the speaker and camera, then press the real doorbell and confirm that you heard it. A new Ring-only installation does not need Ring-MQTT or Mosquitto.
 
 Viper subscribes to Home Assistant events directly. A separate Viper automation package is not needed for a new installation. Sonos and Google Cast speakers use Home Assistant's media player integration. Alexa uses the separately installed Alexa Media Player integration.
 
 ## Existing Installations
 
-Saved devices, routes and settings are retained. The new automatic listener stays off until explicitly enabled, so existing YAML doorbell automations keep working. Before switching to the listener, disable the matching Viper doorbell forwarding automations to avoid duplicate announcements.
+Saved devices, routes and settings are retained. Existing installations stay on their selected RTSP path until explicitly switched. When native Ring and the automatic press listener are selected, Viper ignores legacy Ring-MQTT router events for that door, avoiding duplicate announcements without changing unrelated Home Assistant automations. Keep Ring-MQTT installed until any other dependencies have been checked.
+
+Native Ring currently supports the Fast doorbell description mode. RTSP remains available for Smart, Detailed, true Live and manual video workflows; those modes are not silently converted to a different analysis. Ring live viewing still uses the Ring cloud and may take longer to start on some attempts.
 
 The clean setup currently configures doorbells and speakers. Other device controls remain available to legacy installations; general setup for those devices is not part of the new-household wizard.
 

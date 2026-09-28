@@ -1,12 +1,11 @@
-ARG BUILD_FROM
+ARG BUILD_FROM=python:3.13-slim
 FROM ${BUILD_FROM}
 
-RUN apk add --no-cache ffmpeg py3-pip python3
-RUN python3 -m pip install --break-system-packages --no-cache-dir google-genai websockets
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+RUN python3 -m pip install --no-cache-dir google-genai websockets==15.0.1 aiortc==1.14.0 Pillow==11.3.0
 
 WORKDIR /app
 COPY viper_core /app/viper_core
-COPY run.sh /run.sh
-RUN chmod a+x /run.sh
 
-CMD ["/run.sh"]
+CMD ["python3", "-m", "viper_core"]

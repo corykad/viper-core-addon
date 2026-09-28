@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ha_addons" / "viper_core"))
 from viper_core.config import CoreConfig
@@ -15,6 +15,8 @@ from viper_core.control import ControlState, ControlApi
 from viper_core.doorbell_listener import doorbell_transition
 from viper_core.doorbell_listener import DoorbellListener
 from viper_core.setup import SetupService
+from viper_core.events import EventProcessor
+from viper_core.ha import HomeAssistantClient
 from viper_core.web_ui import render_page
 
 
@@ -27,13 +29,14 @@ class CleanSetupTests(unittest.TestCase):
         self.ha = Mock()
         self.ha.get_states.return_value = [
             {"entity_id": entity, "state": "off", "attributes": {"friendly_name": entity}}
-            for entity in ("event.front_ding", "event.back_ding", "media_player.speaker", "tts.speech")
+            for entity in ("event.front_ding", "event.back_ding", "camera.front_live_view", "media_player.speaker", "tts.speech")
         ]
         self.events = Mock()
         self.events._speak.return_value = {"sent": True}
         self.listener = SimpleNamespace(status={"connection": "connected"})
         self.service = SetupService(self.controls, self.ha, CoreConfig(), self.events, self.listener)
         self.payload = {"front_door_trigger": "event.front_ding", "front_door_stream_url": "rtsp://example.test/front",
+                        "front_door_video_source": "rtsp",
                         "speaker_entity": "media_player.speaker", "tts_entity": "tts.speech",
                         "openai_api_key": "test-only", "doorbell_listener_enabled": "true"}
 
@@ -43,6 +46,7 @@ class CleanSetupTests(unittest.TestCase):
         self.assertEqual([key for key, value in self.controls.state["features"].items() if value], ["doorbell"])
         self.assertFalse(self.controls.state["settings"]["doorbell_listener_enabled"])
         self.assertEqual(self.controls.state["settings"]["front_door_live_stream_switch"], "")
+        self.assertEqual(self.controls.state["settings"]["front_door_video_source"], "ring_native")
 
     def test_corrupt_state_fails_to_empty_defaults(self):
         self.path.write_text("{bad", encoding="utf-8")
@@ -67,6 +71,7 @@ class CleanSetupTests(unittest.TestCase):
         self.assertFalse(state.state["settings"].get("doorbell_listener_enabled", False))
         self.assertEqual(state.state["speakers"], {})
         self.assertEqual(state.state["settings"]["front_door_stream_url"], "rtsp://example.test/old")
+        self.assertEqual(state.state["settings"]["front_door_video_source"], "rtsp")
 
     def test_saved_clean_install_stays_clean(self):
         self.controls._save()
@@ -119,6 +124,68 @@ class CleanSetupTests(unittest.TestCase):
         self.service.handle("save", self.payload)
         self.service.handle("save", {**self.payload, "speaker_entity": ""})
         self.assertNotIn("doorbell speaker", self.controls.state["speakers"])
+
+    def test_native_camera_setup_does_not_require_rtsp(self):
+        payload = {**self.payload, "front_door_video_source": "ring_native",
+                   "front_door_camera_entity": "camera.front_live_view", "front_door_stream_url": ""}
+        result = self.service.handle("save", payload)
+        self.assertTrue(result["ok"], result.get("message"))
+        self.assertNotIn("Select the front live RTSP stream.", self.service.snapshot()["missing"])
+        effective = self.controls.effective_config(CoreConfig())
+        self.assertEqual(effective.front_door_video_source, "ring_native")
+        self.assertEqual(effective.front_door_camera_entity, "camera.front_live_view")
+
+    def test_native_camera_requires_valid_selection_and_fast_mode(self):
+        payload = {**self.payload, "front_door_video_source": "ring_native", "front_door_stream_url": ""}
+        self.assertFalse(self.service.handle("save", payload)["ok"])
+        self.assertFalse(self.service.handle("save", {**payload, "front_door_camera_entity": "camera.missing"})["ok"])
+        self.controls.state["settings"]["doorbell_video_mode"] = "live"
+        self.assertFalse(self.service.handle("save", {**payload, "front_door_camera_entity": "camera.front_live_view"})["ok"])
+
+    def test_native_mode_cannot_be_changed_after_setup(self):
+        payload = {**self.payload, "front_door_video_source": "ring_native",
+                   "front_door_camera_entity": "camera.front_live_view"}
+        self.assertTrue(self.service.handle("save", payload)["ok"])
+        result = ControlApi(self.controls, self.ha).handle_post("/api/control/settings", {"doorbell_video_mode": "live"})
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["field"], "doorbell_video_mode")
+        self.assertEqual(self.controls.state["settings"]["doorbell_video_mode"], "fast")
+
+    def test_native_setup_rejects_mqtt_press_and_non_ring_camera(self):
+        ha = HomeAssistantClient("http://supervisor/core/api", "test-token")
+        ha.get_states = self.ha.get_states
+        ha.get_states.return_value += [
+            {"entity_id": entity, "state": "off", "attributes": {}}
+            for entity in ("binary_sensor.viper_front_door_ring_motion", "camera.other_live_view")
+        ]
+        self.service.ha = ha
+        native = [{"entity_id": "event.front_ding"}, {"entity_id": "camera.front_live_view"}]
+        payload = {**self.payload, "front_door_video_source": "ring_native",
+                   "front_door_camera_entity": "camera.front_live_view"}
+        with patch("viper_core.setup.inventory", new=AsyncMock(return_value=native)):
+            self.assertTrue(self.service.handle("save", payload)["ok"])
+            self.assertFalse(self.service.handle("save", {**payload,
+                "front_door_trigger": "binary_sensor.viper_front_door_ring_motion"})["ok"])
+            self.assertFalse(self.service.handle("save", {**payload,
+                "front_door_camera_entity": "camera.other_live_view"})["ok"])
+        self.assertEqual(self.controls.state["settings"]["front_door_trigger"], "event.front_ding")
+
+    def test_legacy_ring_router_cannot_preempt_native_press(self):
+        settings = self.controls.state["settings"]
+        settings.update(doorbell_listener_enabled=True, front_door_video_source="ring_native",
+                        front_door_trigger="event.front_door_ding")
+        processor = EventProcessor(CoreConfig(), self.ha, self.controls)
+        with patch("viper_core.events.vision.describe_doorbell", return_value="A person is at the door.") as describe, \
+                patch.object(processor, "_notify") as notify:
+            legacy = processor.handle("doorbell", {"door": "front", "action": "motion",
+                                                   "entity_id": "binary_sensor.viper_front_door_ring_motion"})
+            self.assertTrue(legacy["duplicate"])
+            self.assertNotIn("doorbell:front", processor.last_event_by_key)
+            native = processor.handle("doorbell", {"door": "front", "action": "pressed",
+                                                   "entity_id": "event.front_door_ding", "source": "ha_listener"})
+        self.assertTrue(native["ok"])
+        describe.assert_called_once()
+        notify.assert_called_once()
 
     def test_fresh_page_has_no_optional_device_navigation(self):
         html = render_page({"control": self.controls.public_state(), "setup": self.service.snapshot()})

@@ -51,6 +51,7 @@ class CleanImageTests(unittest.TestCase):
             self.assertEqual(state.state["speakers"], {})
             self.assertFalse(state.state["setup_complete"])
             self.assertEqual([key for key, value in state.state["features"].items() if value], ["doorbell"])
+            self.assertEqual(state.state["settings"]["front_door_video_source"], "ring_native")
             for key in ("openai_api_key", "gemini_api_key", "front_door_stream_url", "back_door_stream_url", "front_door_trigger"):
                 self.assertFalse(state.state["settings"][key])
             self.assertNotIn("192.168.", json.dumps(state.public_state()))

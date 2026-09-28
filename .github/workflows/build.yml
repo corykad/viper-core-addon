@@ -23,7 +23,6 @@ jobs:
       - name: Build app
         run: >-
           docker buildx build --load --platform ${{ matrix.platform }}
-          --build-arg BUILD_FROM=ghcr.io/home-assistant/${{ matrix.arch }}-base:latest
           --tag viper-core:test ./viper_core
       - name: Check clean install inside image
         run: >-
