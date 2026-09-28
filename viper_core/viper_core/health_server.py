@@ -288,7 +288,7 @@ class HealthServer:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache, no-store")
-                self.send_header("Connection", "keep-alive")
+                self.send_header("Connection", "close")
                 self.end_headers()
                 try:
                     for item in events:
@@ -296,6 +296,8 @@ class HealthServer:
                         self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     LOGGER.debug("Client disconnected from live stream.")
+                finally:
+                    self.close_connection = True
 
             def _send_audio_stream(self, chunks):
                 self.send_response(200)

@@ -223,6 +223,7 @@ def gemini_true_live_doorbell_events(config, ha_client, control_state, event_han
         if item is stop:
             break
         yield item
+    yield _event("done", f"Finished live description for {_door_label(door).lower()}.")
 
 
 async def _run_gemini_true_live(config, ha_client, control_state, event_handler, door, total_seconds, speak, all_speakers, force_confirmation, session_id, item_queue, command_queue=None):

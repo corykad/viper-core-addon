@@ -13,6 +13,15 @@ from viper_core import live
 
 
 class NativeLiveTests(unittest.IsolatedAsyncioTestCase):
+    async def test_true_live_events_finish_after_worker_exits(self):
+        with patch.object(live, "_run_gemini_true_live", new_callable=AsyncMock):
+            events = list(live.gemini_true_live_doorbell_events(
+                SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), lambda *_: None,
+                "front", session_id="test-native-live-done",
+            ))
+        self.assertEqual([item["event"] for item in events], ["session", "done"])
+        self.assertNotIn("test-native-live-done", live._LIVE_SESSION_COMMANDS)
+
     async def test_true_live_uses_native_frames_without_rtsp(self):
         async def fake_stream(url, token, entity, seconds, callback, fps=1):
             self.assertEqual((url, token, entity, fps),
