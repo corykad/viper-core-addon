@@ -1,5 +1,5 @@
 name: Viper Core
-version: "0.4.5"
+version: "0.4.6"
 slug: viper_core
 description: Always-on Viper event engine for Home Assistant
 url: https://github.com/corykad/viper-core-addon

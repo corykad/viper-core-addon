@@ -127,6 +127,12 @@ async def _capture(url, token, entity_id, progress, duration=None, on_frame=None
                                 tasks.append(asyncio.create_task(end_after_duration()))
                         else:
                             frames.append(item)
+                            if frame_limit == 2 and len(frames) == 1:
+                                async def finish_with_first_frame():
+                                    await asyncio.sleep(3)
+                                    if not done.done():
+                                        done.set_result(None)
+                                tasks.append(asyncio.create_task(finish_with_first_frame()))
                         if not on_frame and len(frames) >= frame_limit:
                             done.set_result(None)
                 except Exception as exc:

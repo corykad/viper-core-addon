@@ -121,6 +121,54 @@ class RingCameraTests(unittest.IsolatedAsyncioTestCase):
             result = await inventory(f"ws://127.0.0.1:{port}", "test-token")
             self.assertEqual([item["entity_id"] for item in result], ["camera.native"])
 
+    async def test_second_frame_stall_returns_first_frame_and_closes_session(self):
+        from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+        from websockets.asyncio.server import serve
+        unsubscribed = asyncio.Event()
+
+        class OneFrameTrack(VideoStreamTrack):
+            def __init__(self):
+                super().__init__()
+                self.sent = 0
+
+            async def recv(self):
+                if self.sent >= 2:
+                    await asyncio.sleep(30)
+                self.sent += 1
+                return await super().recv()
+
+        async def endpoint(socket):
+            peer = RTCPeerConnection()
+            try:
+                await socket.send(json.dumps({"type": "auth_required"}))
+                await socket.recv()
+                await socket.send(json.dumps({"type": "auth_ok"}))
+                await socket.recv()
+                await socket.send(json.dumps({"id": 1, "type": "result", "success": True, "result": {"configuration": {"iceServers": []}}}))
+                offer = json.loads(await socket.recv())
+                await peer.setRemoteDescription(RTCSessionDescription(sdp=offer["offer"], type="offer"))
+                peer.addTrack(OneFrameTrack())
+                await peer.setLocalDescription(await peer.createAnswer())
+                await socket.send(json.dumps({"id": 2, "type": "result", "success": True}))
+                await socket.send(json.dumps({"id": 2, "type": "event", "event": {"type": "session", "session_id": "test-session"}}))
+                await socket.send(json.dumps({"id": 2, "type": "event", "event": {"type": "answer", "answer": peer.localDescription.sdp}}))
+                while True:
+                    message = json.loads(await socket.recv())
+                    if message["type"] == "unsubscribe_events":
+                        unsubscribed.set()
+                        break
+                    await socket.send(json.dumps({"id": message["id"], "type": "result", "success": True}))
+            finally:
+                await peer.close()
+
+        async with serve(endpoint, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            result = await capture(f"ws://127.0.0.1:{port}", "test-token", "camera.test_live", timeout=15)
+            await asyncio.wait_for(unsubscribed.wait(), 2)
+        self.assertEqual(result["frame_count"], 1)
+        self.assertLess(result["elapsed_seconds"], 15)
+        self.assertTrue(result["frames"][0]["jpeg"].startswith(b"\xff\xd8"))
+
     async def test_no_frames_times_out_instead_of_success(self):
         from websockets.asyncio.server import serve
 

@@ -154,7 +154,8 @@ class HealthServer:
                 if control_handler:
                     result = control_handler.handle_post(path, payload)
                     if result is not None:
-                        self._send_json(result, code=200 if result.get("ok", True) else 404)
+                        code = 200 if result.get("ok", True) else (503 if path in ("/api/setup/front-test", "/api/setup/back-test") else 404)
+                        self._send_json(result, code=code)
                         return
                 if not event_handler:
                     self._send_json({"ok": False, "message": "Event handling is not configured."}, code=503)
