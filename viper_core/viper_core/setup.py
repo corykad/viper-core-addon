@@ -84,7 +84,13 @@ class SetupService:
                 door = action.split("-")[0]
                 if door == "back" and not self.controls.state["settings"].get("back_door_enabled"):
                     raise ValueError("Enable the back door before testing it.")
-                description = vision.describe_doorbell(self.controls.effective_config(self.config), self.ha, door)
+                frame_limit = payload.get("frames", 2)
+                if frame_limit not in (1, 2, "1", "2"):
+                    raise ValueError("Choose one or two camera frames for the test.")
+                description = vision.describe_doorbell(
+                    self.controls.effective_config(self.config), self.ha, door,
+                    frame_limit=int(frame_limit),
+                )
                 return self._record(door, bool(description), description or "No image description returned. Check the selected camera, API key and model on the Doorbells page.")
             if action == "finish":
                 state = self.snapshot()

@@ -69,25 +69,25 @@ AI_DESCRIPTION_STYLE_PROMPTS = {
 }
 
 
-def describe_doorbell(config, ha_client, door):
+def describe_doorbell(config, ha_client, door, frame_limit=2):
     provider = _ai_provider(config)
     api_key = _api_key(config, provider)
     if not api_key:
         return ""
     try:
-        frames = capture_doorbell_frames(config, ha_client, door)
+        frames = capture_doorbell_frames(config, ha_client, door, frame_limit=frame_limit)
         if not frames:
             return ""
         prompt = _with_door_context(_photo_prompt(config, door), door)
         if provider == "openai":
             return describe_images_with_openai(
-                frames[:2],
+                frames[:frame_limit],
                 prompt,
                 api_key,
                 _openai_vision_model(getattr(config, "openai_vision_model", "")),
             )
         return describe_images_with_gemini(
-            frames[:2],
+            frames[:frame_limit],
             prompt,
             api_key,
             getattr(config, "gemini_vision_model", "gemini-3.5-flash"),
@@ -97,7 +97,7 @@ def describe_doorbell(config, ha_client, door):
         return ""
 
 
-def capture_doorbell_frames(config, ha_client, door):
+def capture_doorbell_frames(config, ha_client, door, frame_limit=2):
     """Capture fresh frames from the explicitly selected source, without fallback."""
     prefix = "back" if str(door).startswith("back") else "front"
     source = getattr(config, f"{prefix}_door_video_source", "rtsp")
@@ -111,7 +111,7 @@ def capture_doorbell_frames(config, ha_client, door):
             url = ha_client.websocket_url()
         except ValueError as exc:
             raise CameraError(str(exc)) from exc
-        result = asyncio.run(capture(url, ha_client.token, entity))
+        result = asyncio.run(capture(url, ha_client.token, entity, frame_limit=frame_limit))
         LOGGER.info("Native Ring frame capture took %.2fs.", result["elapsed_seconds"])
         return [(frame["jpeg"], "image/jpeg") for frame in result["frames"]]
     if source != "rtsp":

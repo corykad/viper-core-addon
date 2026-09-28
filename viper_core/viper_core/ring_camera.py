@@ -44,13 +44,15 @@ async def inventory(url, token):
             for item in states if item["entity_id"] in ring_ids and item["entity_id"].startswith(("camera.", "event."))]
 
 
-async def capture(url, token, entity_id, timeout=40):
+async def capture(url, token, entity_id, timeout=40, frame_limit=2):
     if not entity_id.startswith("camera."):
         raise CameraError("Choose a camera entity.")
+    if frame_limit not in (1, 2):
+        raise CameraError("Choose one or two camera frames.")
     progress = {"stage": "authentication", "connection": "new"}
     try:
         async with asyncio.timeout(timeout):
-            return await _capture(url, token, entity_id, progress)
+            return await _capture(url, token, entity_id, progress, frame_limit=frame_limit)
     except TimeoutError:
         raise CameraError(f"Timed out waiting for live video (stage: {progress['stage']}, connection: {progress['connection']}, ICE: {progress.get('ice', 'unknown')}, decoded: {progress.get('decoded', 0)}, packets: {progress.get('packets', {})}).") from None
 
@@ -69,7 +71,7 @@ async def stream(url, token, entity_id, seconds, on_frame, fps=1):
         raise CameraError(f"Timed out waiting for live video (stage: {progress['stage']}, decoded: {progress.get('decoded', 0)}).") from None
 
 
-async def _capture(url, token, entity_id, progress, duration=None, on_frame=None, fps=1):
+async def _capture(url, token, entity_id, progress, duration=None, on_frame=None, fps=1, frame_limit=2):
     from aiortc import RTCBundlePolicy, RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
     from aiortc.sdp import SessionDescription, candidate_from_sdp, candidate_to_sdp
 
@@ -125,7 +127,7 @@ async def _capture(url, token, entity_id, progress, duration=None, on_frame=None
                                 tasks.append(asyncio.create_task(end_after_duration()))
                         else:
                             frames.append(item)
-                        if not on_frame and len(frames) == 2:
+                        if not on_frame and len(frames) >= frame_limit:
                             done.set_result(None)
                 except Exception as exc:
                     if not done.done():

@@ -24,7 +24,7 @@ class NativeVisionTests(unittest.TestCase):
                 patch.object(vision, "_capture_stream_frames") as rtsp:
             text = vision.describe_doorbell(self.config(), HomeAssistantClient("http://supervisor/core/api", "test-token"), "front")
         self.assertEqual(text, "A delivery is at the door.")
-        capture.assert_awaited_once_with("ws://supervisor/core/websocket", "test-token", "camera.front_live")
+        capture.assert_awaited_once_with("ws://supervisor/core/websocket", "test-token", "camera.front_live", frame_limit=2)
         self.assertEqual(describe.call_args.args[0], [(b"fresh-1", "image/jpeg"), (b"fresh-2", "image/jpeg")])
         rtsp.assert_not_called()
 
@@ -42,7 +42,19 @@ class NativeVisionTests(unittest.TestCase):
         result = {"frames": [], "elapsed_seconds": 0}
         with patch("viper_core.ring_camera.capture", new_callable=AsyncMock, return_value=result) as capture:
             vision.capture_doorbell_frames(self.config(), HomeAssistantClient("https://ha.example/api", "test"), "front")
-        capture.assert_awaited_once_with("wss://ha.example/api/websocket", "test", "camera.front_live")
+        capture.assert_awaited_once_with("wss://ha.example/api/websocket", "test", "camera.front_live", frame_limit=2)
+
+    def test_one_frame_description_uses_one_native_frame(self):
+        result = {"frames": [{"jpeg": b"fresh-1"}], "elapsed_seconds": 1.2}
+        with patch("viper_core.ring_camera.capture", new_callable=AsyncMock, return_value=result) as capture, \
+                patch.object(vision, "describe_images_with_gemini", return_value="A person approaches.") as describe:
+            text = vision.describe_doorbell(
+                self.config(), HomeAssistantClient("http://supervisor/core/api", "test-token"),
+                "front", frame_limit=1,
+            )
+        self.assertEqual(text, "A person approaches.")
+        capture.assert_awaited_once_with("ws://supervisor/core/websocket", "test-token", "camera.front_live", frame_limit=1)
+        self.assertEqual(describe.call_args.args[0], [(b"fresh-1", "image/jpeg")])
 
     def test_supervisor_websocket_does_not_use_rest_api_path(self):
         self.assertEqual(HomeAssistantClient("http://supervisor/core/api", "test").websocket_url(),

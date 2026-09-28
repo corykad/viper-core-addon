@@ -89,12 +89,16 @@ class RingCameraTests(unittest.IsolatedAsyncioTestCase):
 
         async with serve(endpoint, "127.0.0.1", 0) as server:
             port = server.sockets[0].getsockname()[1]
-            result = await capture(f"ws://127.0.0.1:{port}", "test-token", "camera.test_live", timeout=30)
-            await asyncio.wait_for(unsubscribed.wait(), 2)
-            self.assertEqual(result["source"], "home_assistant_ring_webrtc")
-            self.assertEqual(len(result["frames"]), 2)
-            self.assertTrue(all(frame["jpeg"].startswith(b"\xff\xd8") for frame in result["frames"]))
-            self.assertGreater(result["frames"][1]["pts"], result["frames"][0]["pts"])
+            for frame_limit in (1, 2):
+                unsubscribed.clear()
+                result = await capture(f"ws://127.0.0.1:{port}", "test-token", "camera.test_live",
+                                       timeout=30, frame_limit=frame_limit)
+                await asyncio.wait_for(unsubscribed.wait(), 2)
+                self.assertEqual(result["source"], "home_assistant_ring_webrtc")
+                self.assertEqual(len(result["frames"]), frame_limit)
+                self.assertTrue(all(frame["jpeg"].startswith(b"\xff\xd8") for frame in result["frames"]))
+                if frame_limit == 2:
+                    self.assertGreater(result["frames"][1]["pts"], result["frames"][0]["pts"])
 
     async def test_inventory_excludes_mqtt_cameras(self):
         from websockets.asyncio.server import serve

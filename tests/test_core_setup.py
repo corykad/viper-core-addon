@@ -88,6 +88,13 @@ class CleanSetupTests(unittest.TestCase):
         self.assertEqual(self.controls.state["settings"]["front_door_live_stream_switch"], "")
         self.assertEqual(self.controls.state["settings"]["front_door_video_source"], "ring_native")
 
+    def test_silent_camera_check_accepts_one_frame_without_speaker(self):
+        with patch("viper_core.setup.vision.describe_doorbell", return_value="Clear porch.") as describe:
+            result = self.service.handle("front-test", {"frames": 1})
+        self.assertTrue(result["ok"])
+        self.assertEqual(describe.call_args.kwargs["frame_limit"], 1)
+        self.events._speak.assert_not_called()
+
     def test_corrupt_state_fails_to_empty_defaults(self):
         self.path.write_text("{bad", encoding="utf-8")
         state = ControlState(self.path)
