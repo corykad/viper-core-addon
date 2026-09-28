@@ -114,8 +114,8 @@ async def _capture(url, token, entity_id, progress, duration=None, on_frame=None
                                 "received_at": time.time(), "pts": frame.pts}
                         if on_frame:
                             last_delivered = now
-                            delivered += 1
                             await on_frame(item)
+                            delivered += 1
                             if not deadline_started:
                                 deadline_started = True
                                 async def end_after_duration():
