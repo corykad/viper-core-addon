@@ -4,6 +4,7 @@ import sys
 import tempfile
 import time
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -186,6 +187,36 @@ class CleanSetupTests(unittest.TestCase):
         self.assertTrue(native["ok"])
         describe.assert_called_once()
         notify.assert_called_once()
+
+    def test_existing_household_can_migrate_only_doorbells(self):
+        legacy = ControlState(self.path, profile="legacy")
+        legacy.state["settings"].update(front_door_stream_url="rtsp://front", back_door_stream_url="rtsp://back",
+                                         doorbell_video_mode="fast", ai_provider="gemini")
+        speakers = deepcopy(legacy.state["speakers"])
+        features = deepcopy(legacy.state["features"])
+        payload = {
+            "front_door_video_source": "ring_native", "back_door_video_source": "ring_native",
+            "front_door_camera_entity": "camera.front_door_live_view",
+            "back_door_camera_entity": "camera.back_door_live_view",
+            "front_door_trigger": "event.front_door_ding", "back_door_trigger": "event.back_door_ding",
+            "back_door_enabled": True, "doorbell_listener_enabled": True,
+        }
+        result = ControlApi(legacy, self.ha).handle_post("/api/control/settings", payload)
+        self.assertTrue(result["ok"], result.get("message"))
+        self.assertTrue(legacy.state["setup_complete"])
+        self.assertEqual(legacy.state["speakers"], speakers)
+        self.assertEqual(legacy.state["features"], features)
+        self.assertEqual(legacy.state["settings"]["front_door_stream_url"], "rtsp://front")
+        self.assertEqual(legacy.state["settings"]["back_door_stream_url"], "rtsp://back")
+        for key, value in payload.items():
+            self.assertEqual(legacy.state["settings"][key], value)
+
+    def test_invalid_migration_keeps_saved_settings(self):
+        before = deepcopy(self.controls.state["settings"])
+        result = ControlApi(self.controls, self.ha).handle_post("/api/control/settings", {
+            "front_door_trigger": "binary_sensor.mqtt_ding", "doorbell_listener_enabled": True})
+        self.assertFalse(result["ok"])
+        self.assertEqual(self.controls.state["settings"], before)
 
     def test_fresh_page_has_no_optional_device_navigation(self):
         html = render_page({"control": self.controls.public_state(), "setup": self.service.snapshot()})

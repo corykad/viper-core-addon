@@ -394,10 +394,31 @@ class ControlState:
 
     def set_settings(self, payload):
         settings = self.state.setdefault("settings", {})
+        door_keys = (
+            "front_door_video_source", "back_door_video_source",
+            "front_door_camera_entity", "back_door_camera_entity",
+            "front_door_trigger", "back_door_trigger",
+            "back_door_enabled", "doorbell_listener_enabled",
+        )
+        proposed = {**settings, **{key: payload[key] for key in door_keys if key in payload}}
+        for door in ("front", "back"):
+            source = str(proposed.get(f"{door}_door_video_source") or "rtsp").strip().lower()
+            if source not in {"rtsp", "ring_native"}:
+                raise ValueError("Select an available doorbell video source.")
+            if source != "ring_native" or (door == "back" and not _payload_bool(proposed.get("back_door_enabled"))):
+                continue
+            camera = str(proposed.get(f"{door}_door_camera_entity") or "").strip()
+            trigger = str(proposed.get(f"{door}_door_trigger") or "").strip()
+            if camera and (not camera.startswith("camera.") or not camera.endswith("_live_view")):
+                raise ValueError(f"Select a Ring live-view camera for the {door} door.")
+            if trigger and (not trigger.startswith("event.") or not trigger.endswith("_ding")):
+                raise ValueError(f"Select a Ring ding event for the {door} door.")
+            if _payload_bool(proposed.get("doorbell_listener_enabled")) and (not camera or not trigger):
+                raise ValueError(f"Select a Ring live-view camera and ding event for the {door} door before enabling automatic alerts.")
         requested_mode = str(payload.get("doorbell_video_mode") or "fast").strip().lower()
         if "doorbell_video_mode" in payload and requested_mode != "fast" and any(
-            settings.get(f"{door}_door_video_source") == "ring_native"
-            for door in ("front", "back") if door == "front" or settings.get("back_door_enabled")
+            str(proposed.get(f"{door}_door_video_source") or "rtsp") == "ring_native"
+            for door in ("front", "back") if door == "front" or _payload_bool(proposed.get("back_door_enabled"))
         ):
             raise ValueError("Native Ring video currently supports Fast mode. Switch to RTSP before selecting another mode.")
         updated_messages = _cinderella_messages_from_payload(payload, settings.get("cinderella_messages"))
@@ -410,6 +431,8 @@ class ControlState:
             "back_door_stream_url",
             "front_door_camera_entity",
             "back_door_camera_entity",
+            "front_door_trigger",
+            "back_door_trigger",
             "front_door_live_stream_switch",
             "back_door_live_stream_switch",
             "front_door_photo_prompt",
@@ -447,6 +470,9 @@ class ControlState:
         if "doorbell_video_mode" in payload:
             mode = str(payload.get("doorbell_video_mode") or "fast").strip().lower()
             settings["doorbell_video_mode"] = mode if mode in {"fast", "smart", "live", "detailed", "manual"} else "fast"
+        for key in ("back_door_enabled", "doorbell_listener_enabled"):
+            if key in payload:
+                settings[key] = _payload_bool(payload[key])
         for door in ("front", "back"):
             key = f"{door}_door_video_source"
             if key in payload:

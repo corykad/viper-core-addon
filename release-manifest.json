@@ -11,7 +11,7 @@
     "viper_core/viper_core/__main__.py": "4bc3072f0f17819da7eb0f033456a8cc6a5dce6f5d1f23c839c821653895b555",
     "viper_core/viper_core/bridge_status.py": "c8292eb599a12f17ad11333afcb88eeb632711988c434ddb3c67340880539db1",
     "viper_core/viper_core/config.py": "269ad73342209f839a305d6aa4a73546ca870e5cf7b92fbeed329eaf564761c1",
-    "viper_core/viper_core/control.py": "358688dff6544fae2bca2fc8a669d8fa44a1f58db26b0821d33aaf879e371d03",
+    "viper_core/viper_core/control.py": "07aa1fce3ba891918c48c3e65503dd14e092636916abfdd22a0ab063cf60f4d1",
     "viper_core/viper_core/doorbell_listener.py": "b8a4fcd3ccc522795b7499b6cfa85d5e7f4e95bf229d81c6b45de9ff2cd01c89",
     "viper_core/viper_core/events.py": "df2b07dbd8d2857c04c77e186524a411d2fd32d08b6a8ebd30161864ff5afe2f",
     "viper_core/viper_core/features.py": "9ae21d5af10f4824e4c49ea15fb40162b535aca2f1b99b202a4376132ed64616",
@@ -29,7 +29,7 @@
     "repository.yaml": "27b4f3a4ad100fabbad50442498cf4be566b0d39450c2e3da696ab1be05a0f67",
     ".github/workflows/build.yml": "ba440397007f9b6b96073a4ea6f4b2dd803de10e231b9370f078fa71902e0b3c",
     "tests/test_clean_install.py": "f05b6621c10be003865bc39d06ff435d04cb0dee70fb806e50d1c63f37c5ff55",
-    "tests/test_core_setup.py": "af910287678bbd572024ec17c1e2288affd28f3b18fbe98bba23c61da9792007",
+    "tests/test_core_setup.py": "c875feb1f91309f5a11b22213650f2b3fcc0b8428959bbb2469c3c65aead4f2e",
     ".gitignore": "c68174ab1a430e0b083d5ab7b580306bfb8479dbb89004c375961e4d1c94b904",
     ".gitattributes": "d60f352d0db1404c70afb4bb8b2ca3fd1c610572aa40720e8a0b7baa7885418c"
   }
