@@ -22,6 +22,19 @@ from viper_core.web_ui import render_page
 
 
 class CleanSetupTests(unittest.TestCase):
+    def test_unpressed_ring_event_is_available_but_unavailable_event_is_not(self):
+        client = HomeAssistantClient("http://ha", "token")
+        states = {
+            "event.front_door_ding": {"state": "unknown", "attributes": {}},
+            "event.back_door_ding": {"state": "unavailable", "attributes": {}},
+            "switch.other": {"state": "unknown", "attributes": {}},
+        }
+        with patch.object(client, "get_state", side_effect=states.get):
+            status = client.dependency_status(states)
+        self.assertTrue(status["entities"]["event.front_door_ding"]["ok"])
+        self.assertFalse(status["entities"]["event.back_door_ding"]["ok"])
+        self.assertFalse(status["entities"]["switch.other"]["ok"])
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

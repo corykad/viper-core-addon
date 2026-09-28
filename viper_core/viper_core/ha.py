@@ -107,7 +107,7 @@ class HomeAssistantClient:
             try:
                 state = self.get_state(entity_id)
                 current = str((state or {}).get("state") or "unknown").lower()
-                healthy = current not in {"unknown", "unavailable"}
+                healthy = bool(state) and current != "unavailable" and (entity_id.startswith("event.") or current != "unknown")
                 results[entity_id] = {
                     "ok": healthy,
                     "state": current,
