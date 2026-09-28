@@ -79,6 +79,48 @@ class NativeLiveTests(unittest.IsolatedAsyncioTestCase):
         capture.assert_called_once()
         rtsp.assert_not_called()
 
+    def test_rtsp_diagnostics_reuse_recording_for_frames(self):
+        frames = [b"\xff\xd8one\xff\xd9", b"\xff\xd8two\xff\xd9", b"\xff\xd8three\xff\xd9"]
+        config = SimpleNamespace(front_door_video_source="rtsp", front_door_stream_url="rtsp://camera/live",
+                                 front_door_live_stream_switch="")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(live, "LIVE_DEBUG_DIR", Path(directory)), \
+                patch.object(live, "_capture_debug_video") as record, \
+                patch.object(live, "_frames_from_debug_video", return_value=frames) as extract, \
+                patch.object(live, "_start_live_video_process") as second_session, \
+                patch.object(live, "_write_debug_contact_sheet", return_value=None):
+            result = live.capture_diagnostic_frames(config, SimpleNamespace(), "front", seconds=4)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["captured_frames"], 1)
+        record.assert_called_once()
+        extract.assert_called_once()
+        second_session.assert_not_called()
+
+    def test_rtsp_recording_frame_extraction(self):
+        from PIL import Image
+
+        frames = []
+        for shade in (20, 60, 100, 140):
+            output = BytesIO()
+            Image.new("RGB", (128, 72), (shade, 0, 0)).save(output, format="JPEG")
+            frames.append(output.getvalue())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "recording.mp4"
+            path.write_bytes(live.vision._encode_native_video(frames))
+            extracted = live._frames_from_debug_video(path, 4)
+        self.assertEqual(len(extracted), 4)
+        self.assertTrue(all(frame.startswith(b"\xff\xd8") for frame in extracted))
+
+    def test_rtsp_diagnostic_timeout_is_reported(self):
+        config = SimpleNamespace(front_door_video_source="rtsp", front_door_stream_url="rtsp://camera/live",
+                                 front_door_live_stream_switch="")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(live, "LIVE_DEBUG_DIR", Path(directory)), \
+                patch.object(live, "_capture_debug_video", side_effect=live.subprocess.TimeoutExpired("ffmpeg", 30)):
+            result = live.capture_diagnostic_frames(config, SimpleNamespace(), "front", seconds=4)
+        self.assertFalse(result["ok"])
+        self.assertIn("timed out", result["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

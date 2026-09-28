@@ -3,6 +3,7 @@ import logging
 import asyncio
 import base64
 import collections
+import io
 import queue
 import shutil
 import subprocess
@@ -681,7 +682,6 @@ def capture_diagnostic_frames(config, ha_client, door, seconds=8, frame_limit=6)
     if not shutil.which("ffmpeg"):
         return {"ok": False, "message": "ffmpeg is not available."}
     live_stream = vision._prepare_live_stream(config, ha_client, door)
-    process = None
     frames = []
     discarded_frames = 0
     started = time.monotonic()
@@ -691,29 +691,19 @@ def capture_diagnostic_frames(config, ha_client, door, seconds=8, frame_limit=6)
         _cleanup_debug_captures()
         debug_dir.mkdir(parents=True, exist_ok=True)
         mp4_path = debug_dir / "stream.mp4"
-        _capture_debug_video(stream_url, mp4_path, seconds)
-        process = _start_live_video_process(stream_url)
-        reader = _MjpegFrameReader(process.stdout)
         total_seconds = _clamped_int(seconds, 8, 4, 20)
         limit = _clamped_int(frame_limit, 6, 1, 12)
-        warmup_deadline = time.monotonic() + LIVE_VIDEO_WARMUP_SECONDS
-        deadline = time.monotonic() + LIVE_VIDEO_WARMUP_SECONDS + total_seconds
-        while time.monotonic() < deadline and len(frames) < limit:
-            frame = reader.read_frame()
-            if not frame:
-                if process.poll() is not None:
-                    break
-                time.sleep(0.05)
-                continue
-            if time.monotonic() < warmup_deadline or discarded_frames < LIVE_VIDEO_WARMUP_FRAMES:
-                discarded_frames += 1
-                continue
-            frames.append(frame)
+        _capture_debug_video(stream_url, mp4_path, total_seconds)
+        recorded_frames = _frames_from_debug_video(mp4_path, limit + LIVE_VIDEO_WARMUP_FRAMES)
+        discarded_frames = min(LIVE_VIDEO_WARMUP_FRAMES, len(recorded_frames))
+        frames = recorded_frames[discarded_frames:discarded_frames + limit]
         frame_paths = _write_debug_frames(debug_dir, frames)
         contact_sheet_path = _write_debug_contact_sheet(debug_dir, frame_paths)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "door": door, "message": "RTSP recording timed out before diagnostic video was available."}
+    except RuntimeError as exc:
+        return {"ok": False, "door": door, "message": str(exc)}
     finally:
-        if process:
-            _stop_live_video_process(process)
         vision._cleanup_live_stream(ha_client, live_stream)
     artifacts = _debug_artifacts(capture_id, debug_dir, frame_paths if "frame_paths" in locals() else [], contact_sheet_path if "contact_sheet_path" in locals() else None, mp4_path if "mp4_path" in locals() else None, config)
     return {
@@ -799,7 +789,28 @@ def _capture_debug_video(stream_url, output_path, seconds):
     ]
     result = subprocess.run(command, capture_output=True, text=True, timeout=max(30, int(seconds or 8) + 20))
     if result.returncode != 0:
-        LOGGER.warning("Doorbell debug MP4 capture failed: %s", (result.stderr or result.stdout or "FFmpeg failed").strip()[:300])
+        raise RuntimeError("Doorbell RTSP diagnostic recording failed.")
+
+
+def _frames_from_debug_video(path, limit):
+    if not path.exists() or not path.stat().st_size:
+        return []
+    result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(path),
+         "-vf", f"fps={LIVE_VIDEO_FPS},scale=640:-2", "-frames:v", str(limit),
+         "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"],
+        capture_output=True, timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Doorbell RTSP diagnostic frame extraction failed.")
+    reader = _MjpegFrameReader(io.BytesIO(result.stdout))
+    frames = []
+    while len(frames) < limit:
+        frame = reader.read_frame()
+        if not frame:
+            break
+        frames.append(frame)
+    return frames
 
 
 def _write_debug_frames(debug_dir, frames):
