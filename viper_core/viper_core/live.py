@@ -347,7 +347,7 @@ async def _run_gemini_true_live(config, ha_client, control_state, event_handler,
             speaker_streamer.close()
     transcript = _full_live_transcript(state)
     raw_transcript = _raw_live_transcript(state)
-    fallback_text = _describe_now_fallback_if_needed(state, session_id)
+    fallback_text = await asyncio.to_thread(_describe_now_fallback_if_needed, state, session_id)
     if fallback_text:
         _record_raw_live_transcript(state, fallback_text)
         _record_live_transcript(state, fallback_text)
@@ -367,7 +367,7 @@ async def _run_gemini_true_live(config, ha_client, control_state, event_handler,
         raw_transcript = _raw_live_transcript(state)
         item_queue.put({"event": "raw_transcript", "message": raw_transcript, "chunk": fallback_text, "timestamp": int(time.time())})
         item_queue.put(_event("update", fallback_text))
-    _verify_latest_scene_if_needed(state, session_id)
+    await asyncio.to_thread(_verify_latest_scene_if_needed, state, session_id)
     LOGGER.info(
         "Gemini true live transcript for %s: final=%r raw=%r",
         _door_label(door).lower(),
