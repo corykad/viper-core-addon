@@ -868,23 +868,28 @@ def _setup_form(state):
         return f'<label for="setup_{_e(name)}">{_e(label)}</label><select id="setup_{_e(name)}" name="{_e(name)}">{"".join(options)}</select>'
     speaker = (control.get("speakers") or {}).get("doorbell speaker") or {}
     rows = ["<p>Doorbell-only installation. Heat pumps, refrigerator, vacuum and Matterbridge are not required.</p>",
-            '<p>Connect Ring and your speakers in Home Assistant first. Choose the built-in Ring live camera or an RTSP stream for image descriptions. Keep Ring account sign-in inside Home Assistant or Ring-MQTT.</p>',
-            '<p><a href="https://github.com/tsightler/ring-mqtt/wiki">Ring-MQTT setup guide</a></p>',
+            '<p>Connect Ring and your speakers in Home Assistant first. Select the Ring ding event and live-view camera. Keep Ring sign-in inside Home Assistant.</p>',
             _post_button("ui/setup/refresh", "", "", "Refresh Device List"),
             f'<p>{_e(setup.get("discovery_error", ""))}</p>',
             '<form action="/ui/setup/save" method="post"><h3>1. Doorbells</h3>']
     for door, label in (("front", "Main Doorbell"), ("back", "Second Doorbell")):
         if door == "back":
             checked = " checked" if settings.get("back_door_enabled") else ""
+            opened = " open" if checked else ""
+            rows.append(f'<details{opened}><summary>Second Doorbell</summary>')
             rows.append(f'<label><input type="checkbox" name="back_door_enabled" value="true"{checked}> Enable second doorbell</label>')
         rows.append(select(f"{door}_door_trigger", f"{label} Press Event", ("event.", "binary_sensor."), settings.get(f"{door}_door_trigger")))
         source = settings.get(f"{door}_door_video_source") or "rtsp"
         source_options = ''.join(f'<option value="{value}"{" selected" if source == value else ""}>{title}</option>' for value, title in (("rtsp", "RTSP stream"), ("ring_native", "Built-in Ring live camera (Fast mode)")))
         rows.append(f'<label for="setup_{door}_source">{label} Video Source</label><select id="setup_{door}_source" name="{door}_door_video_source">{source_options}</select>')
         rows.append(select(f"{door}_door_camera_entity", f"{label} Live Camera", ("camera.",), settings.get(f"{door}_door_camera_entity")))
-        rows.append(f'<label for="setup_{door}_stream">{label} RTSP URL</label><input id="setup_{door}_stream" name="{door}_door_stream_url" type="password" autocomplete="off" aria-describedby="stream_help">')
+        opened = " open" if source == "rtsp" else ""
+        rows.append(f'<details{opened}><summary>{label} RTSP options</summary>')
+        rows.append(f'<label for="setup_{door}_stream">{label} RTSP URL</label><input id="setup_{door}_stream" name="{door}_door_stream_url" type="password" autocomplete="off" aria-describedby="stream_help_{door}">')
         rows.append(select(f"{door}_door_live_stream_switch", f"{label} Stream Switch (Optional)", ("switch.",), settings.get(f"{door}_door_live_stream_switch")))
-    rows.append('<p id="stream_help">For a built-in Ring camera, select its Live view entity. For RTSP, leave a saved URL blank to keep it. Choose a press event, not motion.</p>')
+        rows.append(f'<p id="stream_help_{door}">Leave a saved RTSP URL blank to keep it.</p><p><a href="https://github.com/tsightler/ring-mqtt/wiki">Ring-MQTT setup guide</a></p></details>')
+        if door == "back":
+            rows.append('</details>')
     checked = " checked" if settings.get("doorbell_listener_enabled") else ""
     rows.append(f'<label><input type="checkbox" name="doorbell_listener_enabled" value="true"{checked}> Listen for doorbell presses automatically</label>')
     rows.append('<h3>2. Announcement Speaker</h3>')
