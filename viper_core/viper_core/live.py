@@ -218,12 +218,15 @@ def gemini_true_live_doorbell_events(config, ha_client, control_state, event_han
         "message": f"Live session started for {_door_label(door).lower()}.",
         "timestamp": int(time.time()),
     }
+    sent_done = False
     while True:
         item = item_queue.get()
         if item is stop:
             break
+        sent_done = sent_done or item.get("event") == "done"
         yield item
-    yield _event("done", f"Finished live description for {_door_label(door).lower()}.")
+    if not sent_done:
+        yield _event("done", f"Finished live description for {_door_label(door).lower()}.")
 
 
 async def _run_gemini_true_live(config, ha_client, control_state, event_handler, door, total_seconds, speak, all_speakers, force_confirmation, session_id, item_queue, command_queue=None):
