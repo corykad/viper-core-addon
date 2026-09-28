@@ -21,9 +21,11 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Build app
-        run: >-
-          docker buildx build --load --platform ${{ matrix.platform }}
-          --tag viper-core:test ./viper_core
+        run: |
+          BUILD_FROM=$(awk '$1 == "${{ matrix.arch }}:" { print $2 }' viper_core/build.yaml)
+          [[ "$BUILD_FROM" == */*/* ]] || { echo "Supervisor requires a fully qualified build_from image"; exit 1; }
+          docker buildx build --load --platform ${{ matrix.platform }} \
+            --build-arg BUILD_FROM="$BUILD_FROM" --tag viper-core:test ./viper_core
       - name: Check clean install inside image
         run: >-
           docker run --rm --platform ${{ matrix.platform }} --entrypoint python3

@@ -1,4 +1,4 @@
-ARG BUILD_FROM=python:3.13-slim
+ARG BUILD_FROM=docker.io/library/python:3.13-slim
 FROM ${BUILD_FROM}
 
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
