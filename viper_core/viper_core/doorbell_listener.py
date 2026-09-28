@@ -30,13 +30,14 @@ def doorbell_transition(data, settings):
     for door in ("front", "back"):
         if door == "back" and not settings.get("back_door_enabled"):
             continue
-        if entity != settings.get(f"{door}_door_trigger"):
-            continue
-        if entity.startswith("binary_sensor.") and after != "on":
-            continue
-        if not entity.startswith(("event.", "binary_sensor.")):
-            continue
-        return {"door": door, "action": "pressed", "entity_id": entity, "source": "ha_listener"}
+        if entity == settings.get(f"{door}_door_trigger"):
+            if entity.startswith("binary_sensor.") and after != "on":
+                continue
+            if entity.startswith(("event.", "binary_sensor.")):
+                return {"door": door, "action": "pressed", "entity_id": entity, "source": "ha_listener"}
+        if (settings.get("doorbell_motion_enabled") and entity.startswith("event.")
+                and entity == settings.get(f"{door}_door_motion_trigger")):
+            return {"door": door, "action": "motion", "entity_id": entity, "source": "ha_listener"}
     return None
 
 
@@ -59,7 +60,10 @@ class DoorbellListener:
                 continue
             try:
                 settings = self.controls.state.get("settings", {})
-                selected = settings.get(f"{payload['door']}_door_trigger") == payload.get("entity_id")
+                key = f"{payload['door']}_door_motion_trigger" if payload.get("action") == "motion" else f"{payload['door']}_door_trigger"
+                selected = settings.get(key) == payload.get("entity_id")
+                if payload.get("action") == "motion":
+                    selected = selected and settings.get("doorbell_motion_enabled")
                 if time.monotonic() - received < 30 and settings.get("doorbell_listener_enabled") and selected:
                     self.handler("doorbell", payload)
             except Exception:
@@ -100,8 +104,11 @@ class DoorbellListener:
                         payload = doorbell_transition((message.get("event") or {}).get("data") or {}, settings)
                         if payload:
                             received_at = int(time.time())
-                            self.status.update(last_event_at=received_at, last_door=payload["door"])
-                            self.status.setdefault("door_events", {})[payload["door"]] = received_at
+                            if payload["action"] == "pressed":
+                                self.status.update(last_event_at=received_at, last_door=payload["door"])
+                                self.status.setdefault("door_events", {})[payload["door"]] = received_at
+                            else:
+                                self.status["last_motion_at"] = received_at
                             try:
                                 self.pending.put_nowait((payload, time.monotonic()))
                             except queue.Full:

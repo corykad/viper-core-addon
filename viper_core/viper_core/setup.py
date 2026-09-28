@@ -121,6 +121,7 @@ class SetupService:
         settings = deepcopy(self.controls.state["settings"])
         known = {item["id"] for item in self.discover(True)}
         back = payload.get("back_door_enabled") == "true"
+        motion_enabled = payload.get("doorbell_motion_enabled") == "true"
         for door in ("front", "back"):
             source = str(payload.get(f"{door}_door_video_source") or settings.get(f"{door}_door_video_source") or "rtsp")
             if source not in {"rtsp", "ring_native"}:
@@ -146,6 +147,13 @@ class SetupService:
                 raise ValueError(f"Select an available {door} stream switch or leave it blank.")
             settings[f"{door}_door_trigger"] = trigger
             settings[f"{door}_door_live_stream_switch"] = switch
+            motion = str(payload.get(f"{door}_door_motion_trigger") or "").strip()
+            if motion and (motion not in known or not motion.startswith("event.") or not motion.endswith("_motion")):
+                raise ValueError(f"Select an available Ring motion event for the {door} door.")
+            if motion_enabled and source == "ring_native" and (door == "front" or back):
+                if not motion or (self._native_ring_ids is not None and motion not in self._native_ring_ids):
+                    raise ValueError(f"Select a built-in Ring motion event for the {door} door.")
+            settings[f"{door}_door_motion_trigger"] = motion
             stream = str(payload.get(f"{door}_door_stream_url") or "").strip()
             if stream:
                 parsed = urlsplit(stream)
@@ -156,6 +164,7 @@ class SetupService:
             raise ValueError("Choose different events for the front and back doors.")
         settings["back_door_enabled"] = back
         settings["doorbell_listener_enabled"] = payload.get("doorbell_listener_enabled") == "true"
+        settings["doorbell_motion_enabled"] = motion_enabled
         tts = str(payload.get("tts_entity") or "")
         if tts and (tts not in known or not tts.startswith("tts.")):
             raise ValueError("Select an available speech provider.")

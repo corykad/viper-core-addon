@@ -398,7 +398,8 @@ class ControlState:
             "front_door_video_source", "back_door_video_source",
             "front_door_camera_entity", "back_door_camera_entity",
             "front_door_trigger", "back_door_trigger",
-            "back_door_enabled", "doorbell_listener_enabled",
+            "front_door_motion_trigger", "back_door_motion_trigger",
+            "back_door_enabled", "doorbell_listener_enabled", "doorbell_motion_enabled",
         )
         proposed = {**settings, **{key: payload[key] for key in door_keys if key in payload}}
         for door in ("front", "back"):
@@ -415,6 +416,11 @@ class ControlState:
                 raise ValueError(f"Select a Ring ding event for the {door} door.")
             if _payload_bool(proposed.get("doorbell_listener_enabled")) and (not camera or not trigger):
                 raise ValueError(f"Select a Ring live-view camera and ding event for the {door} door before enabling automatic alerts.")
+            motion = str(proposed.get(f"{door}_door_motion_trigger") or "").strip()
+            if motion and (not motion.startswith("event.") or not motion.endswith("_motion")):
+                raise ValueError(f"Select a Ring motion event for the {door} door.")
+            if _payload_bool(proposed.get("doorbell_motion_enabled")) and not motion:
+                raise ValueError(f"Select a Ring motion event for the {door} door before enabling motion alerts.")
         updated_messages = _cinderella_messages_from_payload(payload, settings.get("cinderella_messages"))
         for key in [
             "external_base_url",
@@ -427,6 +433,8 @@ class ControlState:
             "back_door_camera_entity",
             "front_door_trigger",
             "back_door_trigger",
+            "front_door_motion_trigger",
+            "back_door_motion_trigger",
             "front_door_live_stream_switch",
             "back_door_live_stream_switch",
             "front_door_photo_prompt",
@@ -464,7 +472,7 @@ class ControlState:
         if "doorbell_video_mode" in payload:
             mode = str(payload.get("doorbell_video_mode") or "fast").strip().lower()
             settings["doorbell_video_mode"] = mode if mode in {"fast", "smart", "live", "detailed", "manual"} else "fast"
-        for key in ("back_door_enabled", "doorbell_listener_enabled"):
+        for key in ("back_door_enabled", "doorbell_listener_enabled", "doorbell_motion_enabled"):
             if key in payload:
                 settings[key] = _payload_bool(payload[key])
         for door in ("front", "back"):
@@ -716,7 +724,9 @@ class ControlState:
                 "front_door_video_source": "ring_native", "back_door_video_source": "ring_native",
                 "front_door_live_stream_switch": "", "back_door_live_stream_switch": "",
                 "doorbell_listener_enabled": False, "back_door_enabled": False,
-                "front_door_trigger": "", "back_door_trigger": "", "tts_entity": "",
+                "doorbell_motion_enabled": False,
+                "front_door_trigger": "", "back_door_trigger": "",
+                "front_door_motion_trigger": "", "back_door_motion_trigger": "", "tts_entity": "",
                 "cinderella_messages": {key: ["Vacuum status changed."] for key in CINDERELLA_MESSAGE_BUCKETS},
             })
             state["settings"]["cinderella_messages"]["specific_errors"] = {}

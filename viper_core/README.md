@@ -25,7 +25,7 @@ Viper subscribes to Home Assistant events directly. A separate Viper automation 
 
 ## Existing Installations
 
-Saved devices, routes and settings are retained. Existing installations stay on their selected RTSP path until explicitly switched. When native Ring and the automatic press listener are selected, Viper ignores legacy Ring-MQTT router events for that door, avoiding duplicate announcements without changing unrelated Home Assistant automations. Keep Ring-MQTT installed until any other dependencies have been checked.
+Saved devices, routes and settings are retained. Existing installations stay on their selected RTSP path until explicitly switched. When native Ring and the automatic listener are selected, Viper ignores legacy Ring-MQTT router events for that door, avoiding duplicate announcements without changing unrelated Home Assistant automations. Native Ring motion events can be enabled separately from presses. Keep Ring-MQTT installed until any other dependencies, such as Ring Chime controls, have been checked.
 
 The selected native Ring camera now supplies Fast descriptions, Smart and Detailed follow-ups, manual video, true-live narration, and diagnostic captures. RTSP remains available as an optional alternative source; saved RTSP URLs are retained for rollback. Ring live viewing still uses the Ring cloud and may take longer to start on some attempts.
 

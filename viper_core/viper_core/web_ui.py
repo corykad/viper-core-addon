@@ -866,7 +866,9 @@ def _setup_form(state):
         options = ['<option value="">Not selected</option>']
         for entity in entities:
             entity_id = entity.get("id", "")
-            if entity_id.startswith(tuple(domains)) and (not name.endswith("_door_camera_entity") or entity_id.endswith("_live_view")):
+            if (entity_id.startswith(tuple(domains))
+                    and (not name.endswith("_door_camera_entity") or entity_id.endswith("_live_view"))
+                    and (not name.endswith("_door_motion_trigger") or entity_id.endswith("_motion"))):
                 selected = " selected" if entity["id"] == value else ""
                 options.append(f'<option value="{_e(entity["id"])}"{selected}>{_e(entity["name"])} ({_e(entity["id"])})</option>')
         return f'<label for="setup_{_e(name)}">{_e(label)}</label><select id="setup_{_e(name)}" name="{_e(name)}">{"".join(options)}</select>'
@@ -896,6 +898,13 @@ def _setup_form(state):
             rows.append('</details>')
     checked = " checked" if settings.get("doorbell_listener_enabled") else ""
     rows.append(f'<label><input type="checkbox" name="doorbell_listener_enabled" value="true"{checked}> Listen for doorbell presses automatically</label>')
+    motion_checked = " checked" if settings.get("doorbell_motion_enabled") else ""
+    motion_open = " open" if motion_checked else ""
+    rows.append(f'<details{motion_open}><summary>Motion Alerts (Optional)</summary>')
+    rows.append(f'<label><input type="checkbox" name="doorbell_motion_enabled" value="true"{motion_checked}> Announce Ring motion events</label>')
+    for door, label in (("front", "Main Doorbell"), ("back", "Second Doorbell")):
+        rows.append(select(f"{door}_door_motion_trigger", f"{label} Motion Event", ("event.",), settings.get(f"{door}_door_motion_trigger")))
+    rows.append('</details>')
     rows.append('<h3>2. Announcement Speaker</h3>')
     rows.append(select("speaker_entity", "Doorbell Speaker", ("media_player.",), speaker.get("id")))
     options = ''.join(f'<option value="{value}"{" selected" if speaker.get("type", "ha") == value else ""}>{label}</option>' for value, label in (("ha", "Home Assistant speaker (Sonos / Google Cast)"), ("alexa", "Alexa Media Player")))
@@ -919,8 +928,12 @@ def _setup_form(state):
         check = (setup.get("checks") or {}).get(key) or {}
         rows.append(f'<p>{_e(check.get("message") or "Not tested yet.")}</p>')
     listener = setup.get("listener") or {}
-    rows.append(f'<p>Automatic alerts: {_e(listener.get("connection", "disabled"))}. Last real press: {_e(_utc_time(listener.get("last_event_at")))}.</p>')
-    rows.append('<p>Press the actual doorbell, listen for its announcement, then refresh the device list to check the event time.</p><form action="/ui/setup/finish" method="post"><label><input type="checkbox" name="heard" value="true" required> I heard the speaker test and the real doorbell announcement</label><button type="submit">Finish Setup</button></form><p><a href="?page=dashboard">Open Dashboard</a></p>')
+    press_label = "Last simulated press" if state.get("simulation") else "Last real press"
+    rows.append(f'<p>Automatic alerts: {_e(listener.get("connection", "disabled"))}. {press_label}: {_e(_utc_time(listener.get("last_event_at")))}.</p>')
+    if state.get("simulation"):
+        rows.append('<p>The press check is simulated after saving. No doorbell or speaker is contacted.</p><form action="/ui/setup/finish" method="post"><label><input type="checkbox" name="heard" value="true" required> I reviewed the simulated speaker, camera, and press checks</label><button type="submit">Finish Setup</button></form><p><a href="?page=dashboard">Open Dashboard</a></p>')
+    else:
+        rows.append('<p>Press the actual doorbell, listen for its announcement, then refresh the device list to check the event time.</p><form action="/ui/setup/finish" method="post"><label><input type="checkbox" name="heard" value="true" required> I heard the speaker test and the real doorbell announcement</label><button type="submit">Finish Setup</button></form><p><a href="?page=dashboard">Open Dashboard</a></p>')
     return ''.join(rows)
 
 

@@ -41,7 +41,7 @@ For a local install before repository publication, place the clean package's `vi
 ## 4. Complete Setup
 
 1. Refresh Device List.
-2. Select the Main Doorbell `event.*_ding` Press Event and `camera.*_live_view` Live Camera. Leave the Video Source on Built-in Ring. Enable the second doorbell only when needed.
+2. Select the Main Doorbell `event.*_ding` Press Event and `camera.*_live_view` Live Camera. Leave the Video Source on Built-in Ring. Enable the second doorbell only when needed. Motion alerts are optional; if wanted, open Motion Alerts and select each `event.*_motion` entity.
 3. Enable Listen for doorbell presses automatically.
 4. Select the Doorbell Speaker and its connection type. For Sonos or Google Cast, select the Home Assistant Speech Provider.
 5. Select the image-description provider and enter that provider's API key.

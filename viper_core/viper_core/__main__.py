@@ -115,6 +115,8 @@ def main():
                     required.extend(settings[key] for key in (f"{door}_door_trigger", f"{door}_door_camera_entity") if settings.get(key) and (key.endswith("_trigger") or settings.get(f"{door}_door_video_source") == "ring_native"))
                     if settings.get(f"{door}_door_video_source") != "ring_native" and settings.get(f"{door}_door_live_stream_switch"):
                         required.append(settings[f"{door}_door_live_stream_switch"])
+                    if settings.get("doorbell_motion_enabled") and settings.get(f"{door}_door_motion_trigger"):
+                        required.append(settings[f"{door}_door_motion_trigger"])
             dependency_status = client.dependency_status(required) if ha_status.get("ok") else {
                 "ok": False,
                 "message": "Skipped because Home Assistant API is not ready.",

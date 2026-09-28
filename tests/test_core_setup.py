@@ -30,7 +30,8 @@ class CleanSetupTests(unittest.TestCase):
         self.ha = Mock()
         self.ha.get_states.return_value = [
             {"entity_id": entity, "state": "off", "attributes": {"friendly_name": entity}}
-            for entity in ("event.front_ding", "event.back_ding", "camera.front_live_view", "media_player.speaker", "tts.speech")
+            for entity in ("event.front_ding", "event.back_ding", "event.front_motion", "event.back_motion",
+                           "camera.front_live_view", "media_player.speaker", "tts.speech")
         ]
         self.events = Mock()
         self.events._speak.return_value = {"sent": True}
@@ -135,6 +136,15 @@ class CleanSetupTests(unittest.TestCase):
         effective = self.controls.effective_config(CoreConfig())
         self.assertEqual(effective.front_door_video_source, "ring_native")
         self.assertEqual(effective.front_door_camera_entity, "camera.front_live_view")
+
+    def test_native_motion_is_optional_and_requires_ring_event(self):
+        payload = {**self.payload, "front_door_video_source": "ring_native",
+                   "front_door_camera_entity": "camera.front_live_view",
+                   "doorbell_motion_enabled": "true"}
+        self.assertFalse(self.service.handle("save", payload)["ok"])
+        self.assertFalse(self.service.handle("save", {**payload, "front_door_motion_trigger": "event.front_ding"})["ok"])
+        self.assertTrue(self.service.handle("save", {**payload, "front_door_motion_trigger": "event.front_motion"})["ok"])
+        self.assertTrue(self.controls.state["settings"]["doorbell_motion_enabled"])
 
     def test_native_camera_requires_valid_selection_in_live_mode(self):
         payload = {**self.payload, "front_door_video_source": "ring_native", "front_door_stream_url": ""}
@@ -241,6 +251,15 @@ class CleanSetupTests(unittest.TestCase):
                 "new_state": {"state": datetime.now(timezone.utc).isoformat()}}
         self.assertEqual(doorbell_transition(data, settings)["door"], "front")
         data["new_state"]["state"] = "2020-01-01T00:00:00+00:00"
+        self.assertIsNone(doorbell_transition(data, settings))
+
+    def test_native_motion_event_is_distinct_from_a_press(self):
+        settings = {"front_door_trigger": "event.front_ding",
+                    "front_door_motion_trigger": "event.front_motion", "doorbell_motion_enabled": True}
+        data = {"entity_id": "event.front_motion", "old_state": {"state": "unknown"},
+                "new_state": {"state": datetime.now(timezone.utc).isoformat()}}
+        self.assertEqual(doorbell_transition(data, settings)["action"], "motion")
+        settings["doorbell_motion_enabled"] = False
         self.assertIsNone(doorbell_transition(data, settings))
 
 
