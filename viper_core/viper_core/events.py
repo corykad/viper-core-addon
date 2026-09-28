@@ -203,7 +203,7 @@ class EventProcessor:
         if mode in {"fast", "manual", "live"}:
             return
         if mode == "smart" and not vision.description_needs_live_followup(first_message):
-            self._record("doorbell_video", {**payload, "door": door, "mode": mode}, True, "Smart live video follow-up skipped; first RTSP pass was clear.")
+            self._record("doorbell_video", {**payload, "door": door, "mode": mode}, True, "Smart live video follow-up skipped; first description was clear.")
             return
         thread = threading.Thread(
             target=self._background_doorbell_video,

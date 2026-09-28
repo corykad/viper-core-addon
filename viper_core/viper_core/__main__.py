@@ -112,7 +112,9 @@ def main():
             settings = control_state.state.get("settings", {})
             for door in ("front", "back"):
                 if door == "front" or settings.get("back_door_enabled"):
-                    required.extend(settings[key] for key in (f"{door}_door_trigger", f"{door}_door_live_stream_switch") if settings.get(key))
+                    required.extend(settings[key] for key in (f"{door}_door_trigger", f"{door}_door_camera_entity") if settings.get(key) and (key.endswith("_trigger") or settings.get(f"{door}_door_video_source") == "ring_native"))
+                    if settings.get(f"{door}_door_video_source") != "ring_native" and settings.get(f"{door}_door_live_stream_switch"):
+                        required.append(settings[f"{door}_door_live_stream_switch"])
             dependency_status = client.dependency_status(required) if ha_status.get("ok") else {
                 "ok": False,
                 "message": "Skipped because Home Assistant API is not ready.",

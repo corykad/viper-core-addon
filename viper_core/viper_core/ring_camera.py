@@ -55,7 +55,21 @@ async def capture(url, token, entity_id, timeout=40):
         raise CameraError(f"Timed out waiting for live video (stage: {progress['stage']}, connection: {progress['connection']}, ICE: {progress.get('ice', 'unknown')}, decoded: {progress.get('decoded', 0)}, packets: {progress.get('packets', {})}).") from None
 
 
-async def _capture(url, token, entity_id, progress):
+async def stream(url, token, entity_id, seconds, on_frame, fps=1):
+    """Deliver fresh JPEGs during one live WebRTC session."""
+    if not entity_id.startswith("camera."):
+        raise CameraError("Choose a camera entity.")
+    seconds = max(1, min(120, int(seconds)))
+    fps = max(0.2, min(4, float(fps)))
+    progress = {"stage": "authentication", "connection": "new"}
+    try:
+        async with asyncio.timeout(seconds + 40):
+            return await _capture(url, token, entity_id, progress, duration=seconds, on_frame=on_frame, fps=fps)
+    except TimeoutError:
+        raise CameraError(f"Timed out waiting for live video (stage: {progress['stage']}, decoded: {progress.get('decoded', 0)}).") from None
+
+
+async def _capture(url, token, entity_id, progress, duration=None, on_frame=None, fps=1):
     from aiortc import RTCBundlePolicy, RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
     from aiortc.sdp import SessionDescription, candidate_from_sdp, candidate_to_sdp
 
@@ -63,6 +77,7 @@ async def _capture(url, token, entity_id, progress):
     tasks = []
     peer = None
     frames = []
+    delivered = 0
     done = asyncio.get_running_loop().create_future()
     async with connection(url, token) as socket:
         config = await request(socket, 1, {"type": "camera/webrtc/get_client_config", "entity_id": entity_id})
@@ -77,25 +92,44 @@ async def _capture(url, token, entity_id, progress):
                 peer.createDataChannel(config["dataChannel"])
 
             async def receive_video(track):
+                nonlocal delivered
                 last_pts = None
+                last_delivered = 0.0
+                deadline_started = False
                 try:
                     while not done.done():
                         frame = await track.recv()
                         progress["decoded"] = progress.get("decoded", 0) + 1
-                        if frames and frame.pts == last_pts:
+                        if last_pts is not None and frame.pts == last_pts:
+                            continue
+                        last_pts = frame.pts
+                        now = time.monotonic()
+                        if on_frame and last_delivered and now - last_delivered < 1 / fps:
                             continue
                         image = frame.to_image()
                         image.thumbnail((1280, 720))
                         output = io.BytesIO()
                         image.save(output, format="JPEG", quality=85)
-                        frames.append({"jpeg": output.getvalue(), "width": frame.width, "height": frame.height,
-                                       "received_at": time.time(), "pts": frame.pts})
-                        last_pts = frame.pts
-                        if len(frames) == 2:
+                        item = {"jpeg": output.getvalue(), "width": frame.width, "height": frame.height,
+                                "received_at": time.time(), "pts": frame.pts}
+                        if on_frame:
+                            last_delivered = now
+                            delivered += 1
+                            await on_frame(item)
+                            if not deadline_started:
+                                deadline_started = True
+                                async def end_after_duration():
+                                    await asyncio.sleep(duration)
+                                    if not done.done():
+                                        done.set_result(None)
+                                tasks.append(asyncio.create_task(end_after_duration()))
+                        else:
+                            frames.append(item)
+                        if not on_frame and len(frames) == 2:
                             done.set_result(None)
-                except Exception:
+                except Exception as exc:
                     if not done.done():
-                        done.set_exception(CameraError("The live video track ended before two frames arrived."))
+                        done.set_exception(exc if isinstance(exc, CameraError) else CameraError("The live video track ended before enough frames arrived."))
 
             @peer.on("track")
             def on_track(track):
@@ -171,7 +205,7 @@ async def _capture(url, token, entity_id, progress):
 
             tasks.append(asyncio.create_task(signaling()))
             await done
-            return {"frames": frames, "elapsed_seconds": round(time.monotonic() - started, 2),
+            return {"frames": frames, "frame_count": delivered or len(frames), "elapsed_seconds": round(time.monotonic() - started, 2),
                     "connection": peer.connectionState, "source": "home_assistant_ring_webrtc"}
         finally:
             progress["ice"] = peer.iceConnectionState

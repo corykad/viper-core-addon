@@ -133,6 +133,24 @@ def describe_live_doorbell(config, ha_client, door, seconds=None, mode="manual")
         return ""
     seconds = _bounded_int(seconds, getattr(config, "doorbell_live_video_seconds", 4), 2, 10)
     prompt = _with_door_context(_video_prompt(config, mode), door)
+    source = getattr(config, f"{'back' if str(door).startswith('back') else 'front'}_door_video_source", "rtsp")
+    if source == "ring_native":
+        try:
+            frames = capture_native_sequence(config, ha_client, door, seconds)
+            if not frames:
+                raise RuntimeError("The Ring camera returned no live frames.")
+            if provider == "gemini":
+                return describe_video_with_gemini(
+                    _encode_native_video(frames), "video/mp4", prompt, api_key,
+                    getattr(config, "gemini_vision_model", "gemini-3.5-flash"),
+                )
+            return describe_images_with_openai(
+                [(frame, "image/jpeg") for frame in frames], prompt, api_key,
+                _openai_vision_model(getattr(config, "openai_vision_model", "")),
+            )
+        except Exception as exc:
+            LOGGER.warning("Doorbell native Ring video analysis failed: %s", exc)
+            return ""
     stream_url = _stream_url(config, door)
     if stream_url and shutil.which("ffmpeg"):
         live_stream = _prepare_live_stream(config, ha_client, door)
@@ -159,6 +177,40 @@ def describe_live_doorbell(config, ha_client, door, seconds=None, mode="manual")
             _cleanup_live_stream(ha_client, live_stream)
     LOGGER.warning("Doorbell live analysis requires an RTSP stream and ffmpeg.")
     return ""
+
+
+def capture_native_sequence(config, ha_client, door, seconds, fps=1):
+    from .ring_camera import stream
+
+    prefix = "back" if str(door).startswith("back") else "front"
+    entity = getattr(config, f"{prefix}_door_camera_entity", "")
+    if not entity or not ha_client.available():
+        raise RuntimeError("Native Ring capture requires a camera and Home Assistant connection.")
+    frames = []
+
+    async def collect(frame):
+        frames.append(frame["jpeg"])
+
+    asyncio.run(stream(ha_client.websocket_url(), ha_client.token, entity, seconds, collect, fps=fps))
+    return frames
+
+
+def _encode_native_video(frames):
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError("Video encoding requires ffmpeg.")
+    with TemporaryDirectory(prefix="viper_core_native_video_") as temp_dir:
+        directory = Path(temp_dir)
+        for index, frame in enumerate(frames):
+            (directory / f"frame_{index:04d}.jpg").write_bytes(frame)
+        path = directory / "ring.mp4"
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-framerate", "1",
+             "-i", str(directory / "frame_%04d.jpg"), "-an", "-c:v", "mpeg4", "-q:v", "5", str(path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or "Video encoding failed.").strip()[:500])
+        return path.read_bytes()
 
 
 def describe_stream_video_with_gemini(stream_url, seconds, prompt, api_key, model):

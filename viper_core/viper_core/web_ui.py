@@ -137,7 +137,11 @@ def render_page(state, page="dashboard"):
         sections["settings"] = [_section("Connection Settings", [_connection_settings(settings)])]
         sections["chimes"] = [_section("Doorbell Chimes", [_chime_assignments(selected_chimes, available_chimes, doorbells_only=True)]), _section("Manage Chime Files", [_manage_chime_files(available_chimes)])]
     title = dict(PAGES).get(page, "Dashboard")
-    return _page_shell("".join(sections.get(page) or sections["dashboard"]), page, title, pages)
+    body = "".join(sections.get(page) or sections["dashboard"])
+    if state.get("simulation"):
+        body = ('<p class="status-line" role="note"><strong>Simulation:</strong> Fake Ring devices and speaker. '
+                'No camera, audio, or home controls are contacted. Do not enter real API keys.</p>' + body)
+    return _page_shell(body, page, title, pages)
 
 
 def render_all_page_for_legacy_tests(state):
@@ -880,7 +884,7 @@ def _setup_form(state):
             rows.append(f'<label><input type="checkbox" name="back_door_enabled" value="true"{checked}> Enable second doorbell</label>')
         rows.append(select(f"{door}_door_trigger", f"{label} Press Event", ("event.", "binary_sensor."), settings.get(f"{door}_door_trigger")))
         source = settings.get(f"{door}_door_video_source") or "rtsp"
-        source_options = ''.join(f'<option value="{value}"{" selected" if source == value else ""}>{title}</option>' for value, title in (("rtsp", "RTSP stream"), ("ring_native", "Built-in Ring live camera (Fast mode)")))
+        source_options = ''.join(f'<option value="{value}"{" selected" if source == value else ""}>{title}</option>' for value, title in (("rtsp", "RTSP stream"), ("ring_native", "Built-in Ring live camera")))
         rows.append(f'<label for="setup_{door}_source">{label} Video Source</label><select id="setup_{door}_source" name="{door}_door_video_source">{source_options}</select>')
         rows.append(select(f"{door}_door_camera_entity", f"{label} Live Camera", ("camera.",), settings.get(f"{door}_door_camera_entity")))
         opened = " open" if source == "rtsp" else ""

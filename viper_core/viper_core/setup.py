@@ -154,10 +154,6 @@ class SetupService:
                 settings[f"{door}_door_stream_url"] = stream
         if back and settings["front_door_trigger"] and settings["front_door_trigger"] == settings["back_door_trigger"]:
             raise ValueError("Choose different events for the front and back doors.")
-        if any(settings.get(f"{door}_door_video_source") == "ring_native" for door in ("front", "back") if door == "front" or back):
-            mode = settings.get("doorbell_video_mode") or "fast"
-            if mode != "fast":
-                raise ValueError("Native Ring video currently supports Fast mode. Select Fast mode on the Doorbells page.")
         settings["back_door_enabled"] = back
         settings["doorbell_listener_enabled"] = payload.get("doorbell_listener_enabled") == "true"
         tts = str(payload.get("tts_entity") or "")

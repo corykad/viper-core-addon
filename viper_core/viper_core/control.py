@@ -415,12 +415,6 @@ class ControlState:
                 raise ValueError(f"Select a Ring ding event for the {door} door.")
             if _payload_bool(proposed.get("doorbell_listener_enabled")) and (not camera or not trigger):
                 raise ValueError(f"Select a Ring live-view camera and ding event for the {door} door before enabling automatic alerts.")
-        requested_mode = str(payload.get("doorbell_video_mode") or "fast").strip().lower()
-        if "doorbell_video_mode" in payload and requested_mode != "fast" and any(
-            str(proposed.get(f"{door}_door_video_source") or "rtsp") == "ring_native"
-            for door in ("front", "back") if door == "front" or _payload_bool(proposed.get("back_door_enabled"))
-        ):
-            raise ValueError("Native Ring video currently supports Fast mode. Switch to RTSP before selecting another mode.")
         updated_messages = _cinderella_messages_from_payload(payload, settings.get("cinderella_messages"))
         for key in [
             "external_base_url",
@@ -858,8 +852,7 @@ class ControlApi:
             try:
                 return {"ok": True, "state": self.control_state.set_settings(payload)}
             except ValueError as exc:
-                field = "doorbell_video_mode" if str(exc).startswith("Native Ring video") else "cinderella_specific_errors_json"
-                return {"ok": False, "message": str(exc), "field": field}
+                return {"ok": False, "message": str(exc), "field": "cinderella_specific_errors_json"}
         if path == "/api/control/hvac":
             return self._set_hvac(payload)
         if path == "/api/control/vacuum":

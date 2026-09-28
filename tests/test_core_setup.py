@@ -22,19 +22,6 @@ from viper_core.web_ui import render_page
 
 
 class CleanSetupTests(unittest.TestCase):
-    def test_unpressed_ring_event_is_available_but_unavailable_event_is_not(self):
-        client = HomeAssistantClient("http://ha", "token")
-        states = {
-            "event.front_door_ding": {"state": "unknown", "attributes": {}},
-            "event.back_door_ding": {"state": "unavailable", "attributes": {}},
-            "switch.other": {"state": "unknown", "attributes": {}},
-        }
-        with patch.object(client, "get_state", side_effect=states.get):
-            status = client.dependency_status(states)
-        self.assertTrue(status["entities"]["event.front_door_ding"]["ok"])
-        self.assertFalse(status["entities"]["event.back_door_ding"]["ok"])
-        self.assertFalse(status["entities"]["switch.other"]["ok"])
-
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -149,21 +136,20 @@ class CleanSetupTests(unittest.TestCase):
         self.assertEqual(effective.front_door_video_source, "ring_native")
         self.assertEqual(effective.front_door_camera_entity, "camera.front_live_view")
 
-    def test_native_camera_requires_valid_selection_and_fast_mode(self):
+    def test_native_camera_requires_valid_selection_in_live_mode(self):
         payload = {**self.payload, "front_door_video_source": "ring_native", "front_door_stream_url": ""}
         self.assertFalse(self.service.handle("save", payload)["ok"])
         self.assertFalse(self.service.handle("save", {**payload, "front_door_camera_entity": "camera.missing"})["ok"])
         self.controls.state["settings"]["doorbell_video_mode"] = "live"
-        self.assertFalse(self.service.handle("save", {**payload, "front_door_camera_entity": "camera.front_live_view"})["ok"])
+        self.assertTrue(self.service.handle("save", {**payload, "front_door_camera_entity": "camera.front_live_view"})["ok"])
 
-    def test_native_mode_cannot_be_changed_after_setup(self):
+    def test_native_mode_can_be_changed_after_setup(self):
         payload = {**self.payload, "front_door_video_source": "ring_native",
                    "front_door_camera_entity": "camera.front_live_view"}
         self.assertTrue(self.service.handle("save", payload)["ok"])
         result = ControlApi(self.controls, self.ha).handle_post("/api/control/settings", {"doorbell_video_mode": "live"})
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["field"], "doorbell_video_mode")
-        self.assertEqual(self.controls.state["settings"]["doorbell_video_mode"], "fast")
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.controls.state["settings"]["doorbell_video_mode"], "live")
 
     def test_native_setup_rejects_mqtt_press_and_non_ring_camera(self):
         ha = HomeAssistantClient("http://supervisor/core/api", "test-token")

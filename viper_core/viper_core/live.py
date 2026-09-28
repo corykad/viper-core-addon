@@ -238,10 +238,14 @@ async def _run_gemini_true_live(config, ha_client, control_state, event_handler,
     api_key = str(getattr(effective_config, "gemini_api_key", "") or "").strip()
     if not api_key:
         raise RuntimeError("Gemini API key is not configured.")
-    stream_url = _stream_url(effective_config, door)
-    if not stream_url:
+    native = getattr(effective_config, f"{door}_door_video_source", "rtsp") == "ring_native"
+    stream_url = _stream_url(effective_config, door) if not native else ""
+    camera_entity = getattr(effective_config, f"{door}_door_camera_entity", "") if native else ""
+    if native and (not camera_entity or not ha_client.available()):
+        raise RuntimeError(f"{_door_label(door)} Ring live camera is not available.")
+    if not native and not stream_url:
         raise RuntimeError(f"{_door_label(door)} RTSP stream URL is not configured.")
-    if not shutil.which("ffmpeg"):
+    if not native and not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is not available.")
     model = str(getattr(effective_config, "gemini_live_model", "") or GEMINI_LIVE_MODEL).strip()
     client = genai.Client(api_key=api_key)
@@ -289,7 +293,7 @@ async def _run_gemini_true_live(config, ha_client, control_state, event_handler,
         "text_audio_fallback_spoken": False,
     }
     speaker_streamer = _LiveSpeakerStreamer(ha_client, control_state, effective_config, all_speakers, item_queue, session_id) if speak else None
-    live_stream = vision._prepare_live_stream(effective_config, ha_client, door)
+    live_stream = vision._prepare_live_stream(effective_config, ha_client, door) if not native else None
     try:
         async with client.aio.live.connect(model=model, config=config_payload) as session:
             receiver = asyncio.create_task(_receive_gemini_live(session, item_queue, audio_buffer, state, speaker_streamer))
@@ -305,6 +309,7 @@ async def _run_gemini_true_live(config, ha_client, control_state, event_handler,
                 session_id=session_id,
                 state=state,
                 effective_config=effective_config,
+                ha_client=ha_client,
                 command_queue=command_queue,
                 item_queue=item_queue,
             )
@@ -478,11 +483,33 @@ async def _send_live_video_stream(
     session_id=None,
     state=None,
     effective_config=None,
+    ha_client=None,
     command_queue=None,
     item_queue=None,
 ):
-    process = await asyncio.to_thread(_start_live_video_process, stream_url)
-    reader = _MjpegFrameReader(process.stdout)
+    native = getattr(effective_config, f"{door}_door_video_source", "rtsp") == "ring_native"
+    process = None
+    reader = None
+    native_task = None
+    frame_queue = None
+    if native:
+        from .ring_camera import stream
+
+        frame_queue = asyncio.Queue(maxsize=4)
+
+        async def receive_frame(item):
+            if frame_queue.full():
+                frame_queue.get_nowait()
+            frame_queue.put_nowait(item["jpeg"])
+
+        camera_entity = getattr(effective_config, f"{door}_door_camera_entity", "")
+        native_task = asyncio.create_task(stream(
+            ha_client.websocket_url(), ha_client.token, camera_entity,
+            max(1, int(deadline - time.monotonic())), receive_frame, fps=LIVE_VIDEO_FPS,
+        ))
+    else:
+        process = await asyncio.to_thread(_start_live_video_process, stream_url)
+        reader = _MjpegFrameReader(process.stdout)
     frame_count = 0
     discarded_frames = 0
     stability_frames = 0
@@ -514,9 +541,18 @@ async def _send_live_video_stream(
                 if item_queue:
                     item_queue.put(_event("status", message))
                 break
-            frame = await asyncio.to_thread(reader.read_frame)
+            if native:
+                if native_task.done() and frame_queue.empty():
+                    native_task.result()
+                    break
+                try:
+                    frame = await asyncio.wait_for(frame_queue.get(), timeout=0.5)
+                except TimeoutError:
+                    continue
+            else:
+                frame = await asyncio.to_thread(reader.read_frame)
             if not frame:
-                if process.poll() is not None:
+                if process and process.poll() is not None:
                     stderr = _read_process_stderr(process)
                     LOGGER.warning("Gemini true live video pipe stopped after %s frame(s): %s", frame_count, stderr or "ffmpeg exited")
                     break
@@ -586,7 +622,11 @@ async def _send_live_video_stream(
                 if item_queue:
                     item_queue.put(_event("status", message))
     finally:
-        await asyncio.to_thread(_stop_live_video_process, process)
+        if native_task:
+            native_task.cancel()
+            await asyncio.gather(native_task, return_exceptions=True)
+        if process:
+            await asyncio.to_thread(_stop_live_video_process, process)
         debug_artifacts = {}
         if debug_dir and saved_frames:
             debug_artifacts = await asyncio.to_thread(_write_live_session_debug_artifacts, debug_dir, saved_frames, effective_config)
@@ -629,6 +669,8 @@ def _next_live_command(command_queue):
 
 def capture_diagnostic_frames(config, ha_client, door, seconds=8, frame_limit=6):
     door = _door_key(door)
+    if getattr(config, f"{door}_door_video_source", "rtsp") == "ring_native":
+        return _capture_native_diagnostic_frames(config, ha_client, door, seconds, frame_limit)
     stream_url = _stream_url(config, door)
     if not stream_url:
         return {"ok": False, "message": f"{_door_label(door)} RTSP stream URL is not configured."}
@@ -684,6 +726,35 @@ def capture_diagnostic_frames(config, ha_client, door, seconds=8, frame_limit=6)
         "elapsed_seconds": round(time.monotonic() - started, 2),
         "artifacts": artifacts,
         "message": f"Captured {len(frames)} diagnostic frame(s) for {_door_label(door).lower()}.",
+    }
+
+
+def _capture_native_diagnostic_frames(config, ha_client, door, seconds, frame_limit):
+    started = time.monotonic()
+    total_seconds = _clamped_int(seconds, 8, 4, 20)
+    limit = _clamped_int(frame_limit, 6, 1, 12)
+    capture_id = f"{door}_{int(time.time() * 1000)}"
+    debug_dir = LIVE_DEBUG_DIR / capture_id
+    _cleanup_debug_captures()
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    frames = vision.capture_native_sequence(config, ha_client, door, total_seconds, fps=LIVE_VIDEO_FPS)
+    discarded = min(LIVE_VIDEO_WARMUP_FRAMES, len(frames))
+    kept = frames[discarded:discarded + limit]
+    frame_paths = _write_debug_frames(debug_dir, kept)
+    contact_sheet_path = _write_debug_contact_sheet(debug_dir, frame_paths)
+    mp4_path = debug_dir / "stream.mp4"
+    if frames:
+        mp4_path.write_bytes(vision._encode_native_video(frames))
+    artifacts = _debug_artifacts(capture_id, debug_dir, frame_paths, contact_sheet_path, mp4_path if frames else None, config)
+    return {
+        "ok": bool(kept), "door": door, "capture_id": capture_id, "stream_url": "",
+        "camera_entity": getattr(config, f"{door}_door_camera_entity", ""),
+        "seconds": total_seconds, "fps": LIVE_VIDEO_FPS,
+        "warmup_seconds": LIVE_VIDEO_WARMUP_SECONDS,
+        "warmup_frames": LIVE_VIDEO_WARMUP_FRAMES, "discarded_frames": discarded,
+        "captured_frames": len(kept), "elapsed_seconds": round(time.monotonic() - started, 2),
+        "artifacts": artifacts,
+        "message": f"Captured {len(kept)} diagnostic frame(s) for {_door_label(door).lower()}.",
     }
 
 

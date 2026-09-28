@@ -28,7 +28,7 @@ Add Home Assistant's built-in [Ring integration](https://www.home-assistant.io/i
 
 For a new Ring-only installation, do not install Ring-MQTT or Mosquitto. Viper opens live video through Home Assistant and listens for its native ding event. Choose the press event, not a motion event. Ring remains cloud-dependent.
 
-Existing RTSP installations can keep their streams and switches. RTSP is still available for optional Smart, Detailed, true Live and manual video workflows; the native camera currently supports Fast descriptions.
+Existing RTSP installations can keep their streams and switches. Native Ring supports Fast, Smart, Detailed, manual video, true-live narration, and diagnostics. RTSP remains an optional source for other cameras or rollback.
 
 No Viper-specific YAML automation package is required.
 
@@ -53,7 +53,7 @@ For a local install before repository publication, place the clean package's `vi
 
 An accepted speaker request does not prove it was audible. The final confirmation is deliberately based on what you heard. Camera tests can incur API charges.
 
-The initial speaker choice can be changed later. Add more announcement destinations on Speakers. Voice controls the speech engine; Doorbells controls image models and prompts. Native Ring supports Fast descriptions; optional long-form live narration still requires an RTSP source. Start with Fast until the physical doorbell test passes.
+The initial speaker choice can be changed later. Add more announcement destinations on Speakers. Voice controls the speech engine; Doorbells controls image models and prompts. Start with Fast until the physical doorbell test passes, then choose Smart or Live if desired. These modes use the selected native Ring camera and do not require RTSP.
 
 ## 5. Handoff And Backup
 
