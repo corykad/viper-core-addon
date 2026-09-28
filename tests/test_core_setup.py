@@ -21,6 +21,44 @@ from viper_core.ha import HomeAssistantClient
 from viper_core.web_ui import render_page
 
 
+class DoorbellLatencyTests(unittest.TestCase):
+    def _processor(self, muted=False):
+        settings = {"doorbell_listener_enabled": True, "front_door_video_source": "ring_native"}
+        config = SimpleNamespace(doorbell_video_mode="fast", doorbell_dedupe_seconds=30,
+                                 doorbell_speaker_service="")
+        controls = SimpleNamespace(
+            state={"settings": settings}, feature_enabled=lambda _feature: True,
+            effective_config=lambda _config: config,
+            public_state=lambda: {"armed": True, "global_mute": muted},
+        )
+        return EventProcessor(config, SimpleNamespace(available=lambda: True), controls)
+
+    def test_real_press_starts_one_chime_before_vision(self):
+        processor = self._processor()
+        order = []
+        processor._play_event_chime = Mock(side_effect=lambda *_args: order.append("chime"))
+        processor._notify = Mock(side_effect=lambda *_args, **_kwargs: order.append("notify"))
+
+        def thread_factory(*, target, args, **_kwargs):
+            return SimpleNamespace(start=lambda: target(*args))
+
+        with patch("viper_core.events.threading.Thread", side_effect=thread_factory), \
+                patch("viper_core.events.vision.describe_doorbell", side_effect=lambda *_args: order.append("vision") or "Clear porch"):
+            processor.handle("doorbell", {"door": "front", "action": "pressed", "source": "ha_listener"})
+
+        self.assertEqual(order, ["chime", "vision", "notify"])
+        self.assertFalse(processor._notify.call_args.kwargs["play_chime"])
+
+    def test_muted_press_does_not_start_early_chime(self):
+        processor = self._processor(muted=True)
+        processor._play_event_chime = Mock()
+        processor._notify = Mock()
+        with patch("viper_core.events.vision.describe_doorbell", return_value="Clear porch"):
+            processor.handle("doorbell", {"door": "front", "action": "pressed", "source": "ha_listener"})
+        processor._play_event_chime.assert_not_called()
+        self.assertTrue(processor._notify.call_args.kwargs["play_chime"])
+
+
 class CleanSetupTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

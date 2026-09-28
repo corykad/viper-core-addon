@@ -55,6 +55,15 @@ class EventProcessor:
         if not is_test and self._is_duplicate(key, seconds=getattr(effective_config, "doorbell_dedupe_seconds", 30)):
             return self._record("doorbell", payload, True, f"Ignored duplicate {_door_label(door)} event from {action}.", duplicate=True)
         mode = str(getattr(effective_config, "doorbell_video_mode", "fast") or "fast").lower()
+        started = time.monotonic()
+        early_chime = (not is_test and payload.get("source") == "ha_listener" and mode != "live"
+                       and self.ha.available() and not (self.control_state and self.control_state.public_state().get("global_mute")))
+        if early_chime:
+            threading.Thread(
+                target=self._play_event_chime,
+                args=("doorbell", {**payload, "door": door}, "doorbell"),
+                name=f"doorbell-chime-{door}", daemon=True,
+            ).start()
         if mode == "live":
             seconds = getattr(effective_config, "doorbell_live_video_seconds", 30)
             session_id = live.create_live_session(door)
@@ -69,6 +78,7 @@ class EventProcessor:
         else:
             message = vision.describe_doorbell(effective_config, self.ha, door)
             live_url = _doorbell_live_url(effective_config, door)
+        vision_seconds = time.monotonic() - started
         if not message:
             message = f"{_door_label(door)}bell {action.replace('_', ' ')}."
         else:
@@ -81,7 +91,11 @@ class EventProcessor:
             "doorbell",
             {**payload, "door": door, "live_url": live_url},
             speak=mode != "live",
+            play_chime=not early_chime,
         )
+        LOGGER.info("Doorbell %s %s: vision %.2fs, notification dispatch %.2fs, total %.2fs.",
+                    door, mode, vision_seconds, time.monotonic() - started - vision_seconds,
+                    time.monotonic() - started)
         if mode != "live":
             self._maybe_start_video_followup(door, message, effective_config, payload)
         return self._record("doorbell", {**payload, "door": door}, True, message)
@@ -301,7 +315,7 @@ class EventProcessor:
             return self._record("voice_test", payload, False, f"Voice test failed: {result['error']}")
         return self._record("voice_test", payload, True, message)
 
-    def _notify(self, title, message, speaker_service, category, event_type="", payload=None, speak=True):
+    def _notify(self, title, message, speaker_service, category, event_type="", payload=None, speak=True, play_chime=True):
         event_payload = payload if isinstance(payload, dict) else {}
         if not self.ha.available():
             LOGGER.warning("Skipping HA notification because HA is not configured: %s", message)
@@ -337,7 +351,7 @@ class EventProcessor:
                 LOGGER.info("Direct Pushover sent for %s.", event_type or category)
             except Exception as exc:
                 LOGGER.warning("Direct Pushover failed: %s", exc)
-        chime_played = self._play_event_chime(event_type, event_payload, category)
+        chime_played = self._play_event_chime(event_type, event_payload, category) if play_chime else False
         if event_type == "fridge" and chime_played:
             LOGGER.info("Skipping refrigerator speech because chime handled %s.", message)
             return
