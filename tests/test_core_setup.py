@@ -1,5 +1,6 @@
 import json
 import asyncio
+import os
 import sys
 import tempfile
 import time
@@ -13,6 +14,7 @@ from unittest.mock import AsyncMock, Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ha_addons" / "viper_core"))
 from viper_core.config import CoreConfig
 from viper_core.control import ControlState, ControlApi
+from viper_core import control as control_module
 from viper_core.doorbell_listener import doorbell_transition
 from viper_core.doorbell_listener import DoorbellListener
 from viper_core.setup import SetupService
@@ -151,6 +153,62 @@ class CleanSetupTests(unittest.TestCase):
         self.assertEqual(state["ice_maker"]["observed_state"], "off")
         self.assertTrue(self.controls.state["ice_maker"]["enabled"])
         self.ha.get_state.assert_called_once_with("switch.refrigerator_cubed_ice")
+
+    def test_chime_uses_home_assistant_media_source_for_cast_speaker(self):
+        self.controls.state["features"]["fridge"] = True
+        self.controls.state["speakers"] = {"entry way speaker": {
+            "id": "media_player.entryway_speaker", "type": "ha", "enabled": True, "fridge": True,
+        }}
+        self.ha.get_state.return_value = {"state": "off"}
+        processor = EventProcessor(CoreConfig(), self.ha, self.controls)
+
+        self.assertTrue(processor._play_chime("correct-answer-tone.mp3", "fridge"))
+
+        self.ha.call_service.assert_called_once_with("media_player/play_media", {
+            "entity_id": "media_player.entryway_speaker",
+            "media_content_id": "media-source://media_source/local/viper_core_chimes/correct-answer-tone.mp3",
+            "media_content_type": "audio/mpeg",
+        })
+
+    def test_chime_does_not_claim_unavailable_speaker_played(self):
+        self.controls.state["features"]["fridge"] = True
+        self.controls.state["speakers"] = {"entry way speaker": {
+            "id": "media_player.entryway_speaker", "type": "ha", "enabled": True, "fridge": True,
+        }}
+        self.ha.get_state.return_value = {"state": "unavailable"}
+        processor = EventProcessor(CoreConfig(), self.ha, self.controls)
+
+        self.assertFalse(processor._play_chime("correct-answer-tone.mp3", "fridge"))
+        self.ha.call_service.assert_not_called()
+
+    def test_chime_falls_back_to_direct_url_when_media_source_rejected(self):
+        self.controls.state["features"]["fridge"] = True
+        self.controls.state["speakers"] = {"entry way speaker": {
+            "id": "media_player.entryway_speaker", "type": "ha", "enabled": True, "fridge": True,
+        }}
+        self.controls.state["settings"]["speaker_base_url"] = "http://192.168.4.36:8099"
+        self.ha.get_state.return_value = {"state": "off"}
+        self.ha.call_service.side_effect = [RuntimeError("media source rejected"), None]
+        processor = EventProcessor(CoreConfig(), self.ha, self.controls)
+
+        self.assertTrue(processor._play_chime("correct-answer-tone.mp3", "fridge"))
+        self.assertEqual(self.ha.call_service.call_count, 2)
+        self.assertEqual(self.ha.call_service.call_args.args[1]["media_content_id"],
+                         "http://192.168.4.36:8099/chimes/correct-answer-tone.mp3")
+
+    def test_new_chime_upload_replaces_older_media_copy(self):
+        root = Path(self.directory.name)
+        chime_dir = root / "data" / "chimes"
+        media_dir = root / "media" / "viper_core_chimes"
+        media_dir.mkdir(parents=True)
+        old = media_dir / "freezer-close.mp3"
+        old.write_bytes(b"old longer chime")
+        os.utime(old, (time.time() - 60, time.time() - 60))
+        with patch.object(control_module, "CHIMES_DIR", chime_dir), patch.object(control_module, "MEDIA_CHIMES_DIR", media_dir):
+            result = self.controls.save_chime_file("freezer-close.mp3", b"new")
+            self.assertTrue(result["ok"])
+            self.assertEqual((chime_dir / "freezer-close.mp3").read_bytes(), b"new")
+            self.assertEqual(old.read_bytes(), b"new")
 
     def test_invalid_save_does_not_partially_mutate(self):
         before = self.controls.public_state()

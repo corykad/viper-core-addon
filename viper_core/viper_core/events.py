@@ -381,33 +381,41 @@ class EventProcessor:
             except Exception as exc:
                 LOGGER.warning("Direct Sonos chime failed: %s", exc)
         for target in route_targets["ha"]:
-            ha_media = url or media_source
+            get_state = getattr(self.ha, "get_state", None)
+            if callable(get_state):
+                try:
+                    speaker_state = str((get_state(target) or {}).get("state") or "unknown").lower()
+                except Exception:
+                    speaker_state = "unknown"
+                if speaker_state in {"unknown", "unavailable"}:
+                    LOGGER.warning("Skipping chime %s because speaker %s is %s.", chime, target, speaker_state)
+                    continue
             try:
                 self.ha.call_service(
                     "media_player/play_media",
                     {
                         "entity_id": target,
-                        "media_content_id": ha_media,
+                        "media_content_id": media_source,
                         "media_content_type": _chime_media_type(chime),
                     },
                 )
                 sent = True
             except Exception as exc:
-                LOGGER.warning("HA chime playback failed: %s", exc)
-                if url and ha_media != media_source:
+                LOGGER.warning("HA chime media source failed: %s", exc)
+                if url:
                     try:
                         self.ha.call_service(
                             "media_player/play_media",
                             {
                                 "entity_id": target,
-                                "media_content_id": media_source,
+                                "media_content_id": url,
                                 "media_content_type": _chime_media_type(chime),
                             },
                         )
-                        LOGGER.info("Played chime %s on %s using media source fallback.", chime, target)
+                        LOGGER.info("Sent chime %s to %s using URL fallback.", chime, target)
                         sent = True
                     except Exception as fallback_exc:
-                        LOGGER.warning("HA chime media source fallback failed: %s", fallback_exc)
+                        LOGGER.warning("HA chime URL fallback failed: %s", fallback_exc)
         if sent:
             LOGGER.info(
                 "Sent chime %s to %s Home Assistant speaker(s) and %s Sonos speaker(s).",

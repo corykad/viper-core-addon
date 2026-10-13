@@ -1406,7 +1406,7 @@ def _sync_chime_directory(source_dir, target_dir):
         target = target_dir / safe_name
         if item.resolve() == target.resolve():
             continue
-        if not target.exists() or item.stat().st_mtime > target.stat().st_mtime or item.stat().st_size != target.stat().st_size:
+        if not target.exists() or item.stat().st_mtime_ns > target.stat().st_mtime_ns:
             shutil.copy2(item, target)
 
 
