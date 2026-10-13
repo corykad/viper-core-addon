@@ -373,11 +373,12 @@ class EventProcessor:
         media_source = _chime_media_source(chime)
         if route_targets["sonos"] and not url:
             LOGGER.warning("Cannot play chime %s on direct Sonos because speaker_base_url or external_base_url is not configured.", chime)
-        sent = False
+        ha_sent = 0
+        sonos_sent = 0
         for target in route_targets["sonos"] if url else []:
             try:
                 _play_sonos_url(target, url)
-                sent = True
+                sonos_sent += 1
             except Exception as exc:
                 LOGGER.warning("Direct Sonos chime failed: %s", exc)
         for target in route_targets["ha"]:
@@ -385,8 +386,9 @@ class EventProcessor:
             if callable(get_state):
                 try:
                     speaker_state = str((get_state(target) or {}).get("state") or "unknown").lower()
-                except Exception:
-                    speaker_state = "unknown"
+                except Exception as exc:
+                    LOGGER.warning("Could not check speaker %s before chime; trying playback: %s", target, exc)
+                    speaker_state = ""
                 if speaker_state in {"unknown", "unavailable"}:
                     LOGGER.warning("Skipping chime %s because speaker %s is %s.", chime, target, speaker_state)
                     continue
@@ -399,7 +401,7 @@ class EventProcessor:
                         "media_content_type": _chime_media_type(chime),
                     },
                 )
-                sent = True
+                ha_sent += 1
             except Exception as exc:
                 LOGGER.warning("HA chime media source failed: %s", exc)
                 if url:
@@ -412,20 +414,20 @@ class EventProcessor:
                                 "media_content_type": _chime_media_type(chime),
                             },
                         )
-                        LOGGER.info("Sent chime %s to %s using URL fallback.", chime, target)
-                        sent = True
+                        LOGGER.info("Requested chime %s on %s using URL fallback.", chime, target)
+                        ha_sent += 1
                     except Exception as fallback_exc:
                         LOGGER.warning("HA chime URL fallback failed: %s", fallback_exc)
-        if sent:
+        if ha_sent or sonos_sent:
             LOGGER.info(
-                "Sent chime %s to %s Home Assistant speaker(s) and %s Sonos speaker(s).",
+                "Requested chime %s on %s Home Assistant speaker(s) and %s Sonos speaker(s); playback is asynchronous.",
                 chime,
-                len(route_targets["ha"]),
-                len(route_targets["sonos"]),
+                ha_sent,
+                sonos_sent,
             )
         else:
             LOGGER.warning("Chime %s was assigned but no compatible speakers were enabled for %s.", chime, category)
-        return sent
+        return bool(ha_sent or sonos_sent)
 
     def _chime_url(self, chime):
         effective_config = self.control_state.effective_config(self.config) if self.control_state else self.config

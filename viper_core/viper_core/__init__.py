@@ -1,3 +1,3 @@
 """Viper Core Home Assistant add-on."""
 
-__version__ = "0.4.8"
+__version__ = "0.4.9"

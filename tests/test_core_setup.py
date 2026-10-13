@@ -181,6 +181,17 @@ class CleanSetupTests(unittest.TestCase):
         self.assertFalse(processor._play_chime("correct-answer-tone.mp3", "fridge"))
         self.ha.call_service.assert_not_called()
 
+    def test_chime_tries_playback_when_speaker_state_lookup_fails(self):
+        self.controls.state["features"]["fridge"] = True
+        self.controls.state["speakers"] = {"entry way speaker": {
+            "id": "media_player.entryway_speaker", "type": "ha", "enabled": True, "fridge": True,
+        }}
+        self.ha.get_state.side_effect = RuntimeError("temporary state lookup failure")
+        processor = EventProcessor(CoreConfig(), self.ha, self.controls)
+
+        self.assertTrue(processor._play_chime("correct-answer-tone.mp3", "fridge"))
+        self.ha.call_service.assert_called_once()
+
     def test_chime_falls_back_to_direct_url_when_media_source_rejected(self):
         self.controls.state["features"]["fridge"] = True
         self.controls.state["speakers"] = {"entry way speaker": {
