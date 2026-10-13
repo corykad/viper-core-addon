@@ -66,7 +66,7 @@ def main():
 
     def current_state():
         state["recent_events"] = list(events.recent_events)
-        state["control"] = control_state.public_state()
+        state["control"] = control_api.public_state()
         state["hvac_commands"] = control_api.hvac_commands()
         state["hvac_history"] = control_api.hvac_history()
         state["fridge_health"] = events.fridge_health

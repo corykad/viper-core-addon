@@ -778,6 +778,20 @@ class ControlApi:
         self._hvac_lock = threading.Lock()
         self._hvac_status_lock = threading.Lock()
 
+    def public_state(self):
+        state = self.control_state.public_state()
+        if not self.control_state.feature_enabled("ice_maker") or not self.ha.available():
+            return state
+        try:
+            observed = str((self.ha.get_state("switch.refrigerator_cubed_ice") or {}).get("state") or "").lower()
+        except Exception:
+            observed = "unknown"
+        ice_maker = state.setdefault("ice_maker", {})
+        ice_maker["observed_state"] = observed
+        if observed in {"on", "off"}:
+            ice_maker["enabled"] = observed == "on"
+        return state
+
     def hvac_commands(self):
         with self._hvac_status_lock:
             return deepcopy(self._hvac_commands)
@@ -794,7 +808,7 @@ class ControlApi:
         if path == "/api/control/hvac/status":
             return {"ok": True, "commands": self.hvac_commands()}
         if path == "/api/control/state":
-            return self.control_state.public_state()
+            return self.public_state()
         if path == "/api/chimes":
             return {"ok": True, "chimes": self.control_state.available_chimes()}
         if path.startswith("/api/doorbell/debug/"):
@@ -841,7 +855,8 @@ class ControlApi:
         if path == "/api/control/ice_maker/enabled":
             result = self._set_ice_maker(state)
             actual_state = result.get("state_matches", state)
-            return {"ok": bool(result.get("ok")), "message": result.get("message", ""), "state": self.control_state.set_ice_maker_enabled(actual_state)}
+            self.control_state.set_ice_maker_enabled(actual_state)
+            return {"ok": bool(result.get("ok")), "message": result.get("message", ""), "state": self.public_state()}
         if path == "/api/control/speakers":
             updated = self.control_state.upsert_speaker(
                 payload.get("name"),

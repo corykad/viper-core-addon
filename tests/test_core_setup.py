@@ -139,6 +139,19 @@ class CleanSetupTests(unittest.TestCase):
         self.assertFalse(api.handle_post("/api/control/hvac", {"mode": "cool"})["ok"])
         self.ha.call_service.assert_not_called()
 
+    def test_ice_maker_public_state_follows_refrigerator_not_saved_command(self):
+        self.controls.state["features"]["ice_maker"] = True
+        self.controls.state["ice_maker"]["enabled"] = True
+        self.ha.available.return_value = True
+        self.ha.get_state.return_value = {"state": "off"}
+
+        state = ControlApi(self.controls, self.ha).handle_get("/api/control/state")
+
+        self.assertFalse(state["ice_maker"]["enabled"])
+        self.assertEqual(state["ice_maker"]["observed_state"], "off")
+        self.assertTrue(self.controls.state["ice_maker"]["enabled"])
+        self.ha.get_state.assert_called_once_with("switch.refrigerator_cubed_ice")
+
     def test_invalid_save_does_not_partially_mutate(self):
         before = self.controls.public_state()
         self.assertFalse(self.service.handle("save", {**self.payload, "speaker_entity": "media_player.missing"})["ok"])
